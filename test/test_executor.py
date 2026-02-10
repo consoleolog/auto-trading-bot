@@ -1,10 +1,12 @@
 import hashlib
+from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
 from urllib.parse import unquote, urlencode
 
 import jwt
 import pytest
 
+from src.trading.exchanges.upbit.codes import Timeframe
 from src.trading.exchanges.upbit.executor import UpbitExecutor
 
 # ============= Fixtures =============
@@ -357,3 +359,136 @@ class TestRequest:
             await executor._request("GET", "/test")
 
         assert "Request Failed" in caplog.text
+
+
+# ============= get_candles =============
+
+SAMPLE_CANDLE_RESPONSE = {
+    "market": "KRW-BTC",
+    "candle_date_time_utc": "2025-06-24T00:00:00",
+    "candle_date_time_kst": "2025-06-24T09:00:00",
+    "opening_price": 50000000,
+    "high_price": 51000000,
+    "low_price": 49000000,
+    "trade_price": 50500000,
+    "timestamp": 1719187200000,
+    "candle_acc_trade_price": 1000000000,
+    "candle_acc_trade_volume": 20.5,
+}
+
+
+class TestGetCandles:
+    @pytest.mark.asyncio
+    async def test_returns_candle_list(self, executor: UpbitExecutor):
+        """응답 데이터를 Candle 객체 리스트로 변환하여 반환한다."""
+        with patch.object(executor, "_request", new_callable=AsyncMock) as mock_req:
+            mock_req.return_value = [SAMPLE_CANDLE_RESPONSE.copy()]
+
+            result = await executor.get_candles("KRW-BTC")
+
+        assert len(result) == 1
+        assert result[0].market == "KRW-BTC"
+        assert result[0].trade_price == Decimal("50500000")
+
+    @pytest.mark.asyncio
+    async def test_default_timeframe_is_day(self, executor: UpbitExecutor):
+        """기본 timeframe이 DAY이다."""
+        with patch.object(executor, "_request", new_callable=AsyncMock) as mock_req:
+            mock_req.return_value = []
+
+            await executor.get_candles("KRW-BTC")
+
+        mock_req.assert_awaited_once()
+        assert mock_req.call_args[0][1] == "/candles/days"
+
+    @pytest.mark.asyncio
+    async def test_custom_timeframe(self, executor: UpbitExecutor):
+        """지정한 timeframe의 endpoint로 요청한다."""
+        with patch.object(executor, "_request", new_callable=AsyncMock) as mock_req:
+            mock_req.return_value = []
+
+            await executor.get_candles("KRW-BTC", timeframe=Timeframe.MINUTE_1)
+
+        assert mock_req.call_args[0][1] == f"/candles/{Timeframe.MINUTE_1.value}"
+
+    @pytest.mark.asyncio
+    async def test_default_count_is_200(self, executor: UpbitExecutor):
+        """기본 count가 200이다."""
+        with patch.object(executor, "_request", new_callable=AsyncMock) as mock_req:
+            mock_req.return_value = []
+
+            await executor.get_candles("KRW-BTC")
+
+        params = mock_req.call_args[1]["params"]
+        assert params["count"] == 200
+
+    @pytest.mark.asyncio
+    async def test_custom_count(self, executor: UpbitExecutor):
+        """지정한 count가 params에 포함된다."""
+        with patch.object(executor, "_request", new_callable=AsyncMock) as mock_req:
+            mock_req.return_value = []
+
+            await executor.get_candles("KRW-BTC", count=50)
+
+        params = mock_req.call_args[1]["params"]
+        assert params["count"] == 50
+
+    @pytest.mark.asyncio
+    async def test_market_in_params(self, executor: UpbitExecutor):
+        """market이 params에 포함된다."""
+        with patch.object(executor, "_request", new_callable=AsyncMock) as mock_req:
+            mock_req.return_value = []
+
+            await executor.get_candles("KRW-ETH")
+
+        params = mock_req.call_args[1]["params"]
+        assert params["market"] == "KRW-ETH"
+
+    @pytest.mark.asyncio
+    async def test_to_param_included_when_specified(self, executor: UpbitExecutor):
+        """to를 지정하면 params에 포함된다."""
+        with patch.object(executor, "_request", new_callable=AsyncMock) as mock_req:
+            mock_req.return_value = []
+
+            await executor.get_candles("KRW-BTC", to="2025-06-24T00:00:00Z")
+
+        params = mock_req.call_args[1]["params"]
+        assert params["to"] == "2025-06-24T00:00:00Z"
+
+    @pytest.mark.asyncio
+    async def test_to_param_excluded_when_none(self, executor: UpbitExecutor):
+        """to를 지정하지 않으면 params에 포함되지 않는다."""
+        with patch.object(executor, "_request", new_callable=AsyncMock) as mock_req:
+            mock_req.return_value = []
+
+            await executor.get_candles("KRW-BTC")
+
+        params = mock_req.call_args[1]["params"]
+        assert "to" not in params
+
+    @pytest.mark.asyncio
+    async def test_uses_get_method(self, executor: UpbitExecutor):
+        """GET 메서드로 요청한다."""
+        with patch.object(executor, "_request", new_callable=AsyncMock) as mock_req:
+            mock_req.return_value = []
+
+            await executor.get_candles("KRW-BTC")
+
+        assert mock_req.call_args[0][0] == "GET"
+
+    @pytest.mark.asyncio
+    async def test_multiple_candles(self, executor: UpbitExecutor):
+        """여러 개의 캔들 응답을 모두 Candle 객체로 변환한다."""
+        first = SAMPLE_CANDLE_RESPONSE.copy()
+        first["trade_price"] = 50500000
+
+        second = SAMPLE_CANDLE_RESPONSE.copy()
+        second["trade_price"] = 51000000
+
+        with patch.object(executor, "_request", new_callable=AsyncMock) as mock_req:
+            mock_req.return_value = [first, second]
+            result = await executor.get_candles("KRW-BTC")
+
+        assert len(result) == 2
+        assert result[0].trade_price == Decimal("51000000")
+        assert result[1].trade_price == Decimal("50500000")

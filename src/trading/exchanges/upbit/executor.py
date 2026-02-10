@@ -7,6 +7,9 @@ from urllib.parse import unquote, urlencode
 import jwt
 
 from src.trading.exchanges.upbit import error_handler
+from src.trading.exchanges.upbit.codes import Timeframe
+from src.trading.exchanges.upbit.models import Candle
+from src.utils import rate_limit, retry_async
 
 try:
     aiohttp = importlib.import_module("aiohttp")
@@ -95,3 +98,37 @@ class UpbitExecutor:
         except aiohttp.ClientError as exception:
             logger.error(f"Request Failed: {exception}")
             raise
+
+    # ========================================================================
+    # CANDLE DATA
+    # ========================================================================
+
+    @rate_limit(calls=9)
+    @retry_async(max_retries=3)
+    async def get_candles(
+        self, market: str, timeframe: Timeframe = Timeframe.DAY, count: int = 200, to: str | None = None
+    ) -> list[Candle]:
+        """
+        캔들 조회 (괴거 -> 최신 순)
+
+        Args:
+            market: 조회하고자 하는 페어(거래쌍)
+            timeframe: 조회하고자 하는 기간
+            count: 조회하고자 하는 캔들의 개수. 최대 200개의 캔들 조회를 지원하며, 기본값은 200입니다.
+            to: 조회 기간의 종료 시각.
+                지정한 시각 이전 캔들을 조회합니다. 미지정시 요청 시각을 기준으로 최근 캔들이 조회됩니다.
+
+                ISO 8601 형식의 datetime으로 아래와 같이 요청 할 수 있습니다.
+                실제 요청 시에는 공백 및 특수문자가 정상적으로 처리되도록 URL 인코딩을 수행해야 합니다.
+                [예시]
+                2025-06-24T04:56:53Z
+                2025-06-24 04:56:53
+                2025-06-24T13:56:53+09:00
+        """
+        params = {"market": market, "count": count}
+        if to:
+            params["to"] = to
+        response = await self._request("GET", f"/candles/{timeframe.value}", params=params)
+        # response 는 최신 -> 과거 데이터이기 때문에 슬라이싱으로 과거 -> 최신으로 정렬
+        candles = [Candle.from_response(r) for r in response[::-1]]
+        return candles

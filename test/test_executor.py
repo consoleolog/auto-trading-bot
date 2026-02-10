@@ -1,5 +1,8 @@
-from unittest.mock import AsyncMock, patch
+import hashlib
+from unittest.mock import AsyncMock, MagicMock, patch
+from urllib.parse import unquote, urlencode
 
+import jwt
 import pytest
 
 from src.trading.exchanges.upbit.executor import UpbitExecutor
@@ -10,7 +13,7 @@ from src.trading.exchanges.upbit.executor import UpbitExecutor
 @pytest.fixture
 def executor():
     """기본 UpbitExecutor 인스턴스를 생성한다."""
-    return UpbitExecutor(api_key="test-key", api_secret="test-secret")
+    return UpbitExecutor(api_key="test-key", api_secret="test-secret-key-that-is-long-enough-for-hs256")
 
 
 @pytest.fixture
@@ -31,7 +34,7 @@ class TestInit:
 
     def test_stores_api_secret(self, executor: UpbitExecutor):
         """api_secret이 인스턴스 속성으로 저장된다."""
-        assert executor.api_secret == "test-secret"
+        assert executor.api_secret == "test-secret-key-that-is-long-enough-for-hs256"
 
     def test_default_test_mode_is_true(self, executor: UpbitExecutor):
         """기본 test 모드가 True이다."""
@@ -171,3 +174,186 @@ class TestEnsureSession:
         await executor._ensure_session()
 
         assert executor._session is mock_session
+
+
+# ============= _sign_request =============
+
+
+class TestSignRequest:
+    def test_returns_valid_jwt(self, executor: UpbitExecutor):
+        """유효한 JWT 토큰을 반환한다."""
+        token = executor._sign_request()
+        decoded = jwt.decode(token, "test-secret-key-that-is-long-enough-for-hs256", algorithms=["HS256"])
+
+        assert decoded["access_key"] == "test-key"
+        assert "nonce" in decoded
+
+    def test_jwt_without_params_has_no_query_hash(self, executor: UpbitExecutor):
+        """params가 없으면 query_hash가 포함되지 않는다."""
+        token = executor._sign_request()
+        decoded = jwt.decode(token, "test-secret-key-that-is-long-enough-for-hs256", algorithms=["HS256"])
+
+        assert "query_hash" not in decoded
+        assert "query_hash_alg" not in decoded
+
+    def test_jwt_with_params_includes_query_hash(self, executor: UpbitExecutor):
+        """params가 있으면 query_hash와 query_hash_alg가 포함된다."""
+        params = {"market": "KRW-BTC"}
+        token = executor._sign_request(params)
+        decoded = jwt.decode(token, "test-secret-key-that-is-long-enough-for-hs256", algorithms=["HS256"])
+
+        assert "query_hash" in decoded
+        assert decoded["query_hash_alg"] == "SHA512"
+
+    def test_query_hash_matches_sha512_of_params(self, executor: UpbitExecutor):
+        """query_hash가 params의 SHA512 해시와 일치한다."""
+        params = {"market": "KRW-BTC", "count": "10"}
+        token = executor._sign_request(params)
+        decoded = jwt.decode(token, "test-secret-key-that-is-long-enough-for-hs256", algorithms=["HS256"])
+
+        query_string = unquote(urlencode(params, doseq=True)).encode("utf-8")
+        expected_hash = hashlib.sha512(query_string).hexdigest()
+
+        assert decoded["query_hash"] == expected_hash
+
+    def test_nonce_is_unique_per_call(self, executor: UpbitExecutor):
+        """호출할 때마다 nonce가 다르다."""
+        token1 = executor._sign_request()
+        token2 = executor._sign_request()
+
+        decoded1 = jwt.decode(token1, "test-secret-key-that-is-long-enough-for-hs256", algorithms=["HS256"])
+        decoded2 = jwt.decode(token2, "test-secret-key-that-is-long-enough-for-hs256", algorithms=["HS256"])
+
+        assert decoded1["nonce"] != decoded2["nonce"]
+
+    def test_empty_params_treated_as_no_params(self, executor: UpbitExecutor):
+        """빈 dict params는 query_hash를 포함하지 않는다."""
+        token = executor._sign_request({})
+        decoded = jwt.decode(token, "test-secret-key-that-is-long-enough-for-hs256", algorithms=["HS256"])
+
+        assert "query_hash" not in decoded
+
+
+# ============= _request =============
+
+
+def _make_response(status: int, json_data: dict) -> AsyncMock:
+    """테스트용 aiohttp 응답 mock을 생성한다."""
+    response = AsyncMock()
+    response.status = status
+    response.json = AsyncMock(return_value=json_data)
+    response.release = MagicMock()
+    return response
+
+
+class TestRequest:
+    @pytest.mark.asyncio
+    async def test_get_request(self, executor: UpbitExecutor, mock_session):
+        """GET 요청이 올바른 URL과 파라미터로 호출된다."""
+        executor._session = mock_session
+        mock_session.get.return_value = _make_response(200, {"result": "ok"})
+
+        result = await executor._request("GET", "/orders", params={"market": "KRW-BTC"})
+
+        mock_session.get.assert_awaited_once()
+        call_kwargs = mock_session.get.call_args
+        assert call_kwargs[0][0] == "https://api.upbit.com/v1/orders"
+        assert call_kwargs[1]["params"] == {"market": "KRW-BTC"}
+        assert result == {"result": "ok"}
+
+    @pytest.mark.asyncio
+    async def test_post_request(self, executor: UpbitExecutor, mock_session):
+        """POST 요청이 json 파라미터로 호출된다."""
+        executor._session = mock_session
+        mock_session.post.return_value = _make_response(200, {"uuid": "abc"})
+
+        result = await executor._request("POST", "/orders", params={"market": "KRW-BTC"})
+
+        mock_session.post.assert_awaited_once()
+        call_kwargs = mock_session.post.call_args
+        assert call_kwargs[1]["json"] == {"market": "KRW-BTC"}
+        assert result == {"uuid": "abc"}
+
+    @pytest.mark.asyncio
+    async def test_delete_request(self, executor: UpbitExecutor, mock_session):
+        """DELETE 요청이 올바르게 호출된다."""
+        executor._session = mock_session
+        mock_session.delete.return_value = _make_response(200, {"uuid": "abc"})
+
+        result = await executor._request("DELETE", "/order", params={"uuid": "abc"})
+
+        mock_session.delete.assert_awaited_once()
+        assert result == {"uuid": "abc"}
+
+    @pytest.mark.asyncio
+    async def test_unknown_method_raises_value_error(self, executor: UpbitExecutor, mock_session):
+        """지원하지 않는 HTTP 메서드는 ValueError를 발생시킨다."""
+        executor._session = mock_session
+
+        with pytest.raises(ValueError, match="Unknown method: PATCH"):
+            await executor._request("PATCH", "/orders")
+
+    @pytest.mark.asyncio
+    async def test_signed_request_adds_authorization_header(self, executor: UpbitExecutor, mock_session):
+        """signed=True이면 Authorization 헤더가 추가된다."""
+        executor._session = mock_session
+        mock_session.get.return_value = _make_response(200, {"data": "ok"})
+
+        await executor._request("GET", "/accounts", signed=True)
+
+        call_kwargs = mock_session.get.call_args
+        auth_header = call_kwargs[1]["headers"]["Authorization"]
+        assert auth_header.startswith("Bearer ")
+
+        token = auth_header.removeprefix("Bearer ")
+        decoded = jwt.decode(token, "test-secret-key-that-is-long-enough-for-hs256", algorithms=["HS256"])
+        assert decoded["access_key"] == "test-key"
+
+    @pytest.mark.asyncio
+    async def test_unsigned_request_has_no_authorization(self, executor: UpbitExecutor, mock_session):
+        """signed=False이면 Authorization 헤더가 없다."""
+        executor._session = mock_session
+        mock_session.get.return_value = _make_response(200, {"data": "ok"})
+
+        await executor._request("GET", "/ticker")
+
+        call_kwargs = mock_session.get.call_args
+        assert "Authorization" not in call_kwargs[1]["headers"]
+
+    @pytest.mark.asyncio
+    async def test_ensures_session_before_request(self, executor: UpbitExecutor):
+        """요청 전에 _ensure_session이 호출된다."""
+        assert executor._session is None
+
+        with patch.object(executor, "_ensure_session", new_callable=AsyncMock) as mock_ensure:
+            mock_ensure.side_effect = Exception("stop here")
+
+            with pytest.raises(Exception, match="stop here"):
+                await executor._request("GET", "/test")
+
+            mock_ensure.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_default_params_and_headers_are_empty_dict(self, executor: UpbitExecutor, mock_session):
+        """params와 headers의 기본값이 빈 dict으로 처리된다."""
+        executor._session = mock_session
+        mock_session.get.return_value = _make_response(200, {})
+
+        await executor._request("GET", "/test")
+
+        call_kwargs = mock_session.get.call_args
+        assert call_kwargs[1]["params"] == {}
+        assert call_kwargs[1]["headers"] == {}
+
+    @pytest.mark.asyncio
+    async def test_client_error_is_logged_and_reraised(self, executor: UpbitExecutor, mock_session, caplog):
+        """aiohttp.ClientError 발생 시 로그를 남기고 다시 발생시킨다."""
+        import aiohttp
+
+        executor._session = mock_session
+        mock_session.get.side_effect = aiohttp.ClientError("connection failed")
+
+        with caplog.at_level("ERROR"), pytest.raises(aiohttp.ClientError):
+            await executor._request("GET", "/test")
+
+        assert "Request Failed" in caplog.text

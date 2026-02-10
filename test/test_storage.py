@@ -2,7 +2,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.database import DataStorage
+from src.database import DataStorage  # 실제 모듈 경로로 수정 필요
 
 
 class TestDataStorage:
@@ -335,7 +335,7 @@ class TestDataStorage:
             "trades_count": 0,
             "time_in_force": "ioc",
             "identifier": "test-identifier",
-            "smp_type": "cn",
+            "smp_type": None,
             "prevented_volume": Decimal("0"),
             "prevented_locked": Decimal("0"),
         }
@@ -387,7 +387,7 @@ class TestDataStorage:
             "trades_count": 1,
             "time_in_force": "ioc",
             "identifier": "my-custom-id",
-            "smp_type": "cn",
+            "smp_type": "cancel_taker",
             "prevented_volume": Decimal("0"),
             "prevented_locked": Decimal("0"),
         }
@@ -439,7 +439,7 @@ class TestDataStorage:
             "trades_count": 0,
             "time_in_force": "ioc",
             "identifier": "specific-identifier",
-            "smp_type": "cn",
+            "smp_type": "reduce",
             "prevented_volume": Decimal("0"),
             "prevented_locked": Decimal("0"),
         }
@@ -507,3 +507,162 @@ class TestDataStorage:
 
         with pytest.raises(ValueError, match="uuid 또는 identifier 중 하나는 반드시 지정해야 합니다"):
             await storage.get_order()
+
+    # ============= save_technical_signal =============
+
+    @pytest.mark.asyncio
+    async def test_save_technical_signal_inserts_new_signal(self, storage):
+        """새로운 기술적 시그널을 DB에 저장한다."""
+        from src.strategies.codes import SignalDirection, SignalStrength, SignalType
+        from src.strategies.models import TechnicalSignal
+
+        signal = TechnicalSignal(
+            signal_name="macd",
+            signal_type=SignalType.CROSS_OVER,
+            signal_value="golden_cross",
+            signal_strength=SignalStrength.STRONG_BID,
+            signal_direction=SignalDirection.LONG,
+        )
+
+        mock_conn = AsyncMock()
+        mock_ctx = AsyncMock()
+        mock_ctx.__aenter__.return_value = mock_conn
+        mock_ctx.__aexit__.return_value = None
+
+        mock_pool = MagicMock()
+        mock_pool.acquire.return_value = mock_ctx
+
+        storage._pool = mock_pool
+        storage._connected = True
+
+        await storage.save_technical_signal(signal)
+
+        mock_conn.execute.assert_awaited_once()
+        call_args = mock_conn.execute.await_args
+        sql = call_args[0][0]
+        assert "INSERT INTO analytics.technical_signals" in sql
+        assert "ON CONFLICT" in sql
+
+    @pytest.mark.asyncio
+    async def test_save_technical_signal_updates_existing_signal_on_conflict(self, storage):
+        """동일한 시그널이 존재하면 업데이트한다."""
+        from src.strategies.codes import SignalDirection, SignalStrength, SignalType
+        from src.strategies.models import TechnicalSignal
+
+        signal = TechnicalSignal(
+            signal_name="rsi",
+            signal_type=SignalType.OVER_LINE,
+            signal_value="oversold",
+            signal_strength=SignalStrength.BID,
+            signal_direction=SignalDirection.LONG,
+        )
+
+        mock_conn = AsyncMock()
+        mock_ctx = AsyncMock()
+        mock_ctx.__aenter__.return_value = mock_conn
+        mock_ctx.__aexit__.return_value = None
+
+        mock_pool = MagicMock()
+        mock_pool.acquire.return_value = mock_ctx
+
+        storage._pool = mock_pool
+        storage._connected = True
+
+        await storage.save_technical_signal(signal)
+
+        mock_conn.execute.assert_awaited_once()
+        call_args = mock_conn.execute.await_args
+        sql = call_args[0][0]
+        assert "DO UPDATE SET" in sql
+        assert "last_updated_at = NOW()" in sql
+
+    @pytest.mark.asyncio
+    async def test_save_technical_signal_does_nothing_when_disconnected(self, storage):
+        """연결되지 않은 상태에서는 아무 작업도 하지 않는다."""
+        from src.strategies.codes import SignalDirection, SignalStrength, SignalType
+        from src.strategies.models import TechnicalSignal
+
+        signal = TechnicalSignal(
+            signal_name="macd",
+            signal_type=SignalType.CROSS_OVER,
+            signal_value="dead_cross",
+            signal_strength=SignalStrength.STRONG_ASK,
+            signal_direction=SignalDirection.CLOSE,
+        )
+
+        storage._connected = False
+        storage._pool = None
+
+        await storage.save_technical_signal(signal)
+
+    # ============= get_technical_signal =============
+
+    @pytest.mark.asyncio
+    async def test_get_technical_signal_returns_signal(self, storage):
+        """signal_name과 signal_type으로 기술적 시그널을 조회한다."""
+        from datetime import datetime
+
+        mock_row = {
+            "signal_name": "macd",
+            "signal_type": "crossover",
+            "signal_value": "golden_cross",
+            "signal_strength": 2,
+            "signal_direction": "LONG",
+            "created_at": datetime(2026, 2, 10, 12, 0, 0),
+            "last_updated_at": datetime(2026, 2, 10, 12, 0, 0),
+        }
+
+        mock_conn = AsyncMock()
+        mock_conn.fetchrow.return_value = mock_row
+
+        mock_ctx = AsyncMock()
+        mock_ctx.__aenter__.return_value = mock_conn
+        mock_ctx.__aexit__.return_value = None
+
+        mock_pool = MagicMock()
+        mock_pool.acquire.return_value = mock_ctx
+
+        storage._pool = mock_pool
+        storage._connected = True
+
+        signal = await storage.get_technical_signal(signal_name="macd", signal_type="crossover")
+
+        assert signal is not None
+        assert signal.signal_name == "macd"
+        assert signal.signal_type.value == "crossover"
+        assert signal.signal_value == "golden_cross"
+        mock_conn.fetchrow.assert_awaited_once()
+        call_args = mock_conn.fetchrow.await_args
+        sql = call_args[0][0]
+        assert "WHERE t.signal_name = $1" in sql
+        assert "AND t.signal_type = $2" in sql
+
+    @pytest.mark.asyncio
+    async def test_get_technical_signal_returns_none_when_not_found(self, storage):
+        """시그널이 없으면 None을 반환한다."""
+        mock_conn = AsyncMock()
+        mock_conn.fetchrow.return_value = None
+
+        mock_ctx = AsyncMock()
+        mock_ctx.__aenter__.return_value = mock_conn
+        mock_ctx.__aexit__.return_value = None
+
+        mock_pool = MagicMock()
+        mock_pool.acquire.return_value = mock_ctx
+
+        storage._pool = mock_pool
+        storage._connected = True
+
+        signal = await storage.get_technical_signal(signal_name="non-existent", signal_type="crossover")
+
+        assert signal is None
+
+    @pytest.mark.asyncio
+    async def test_get_technical_signal_returns_none_when_disconnected(self, storage):
+        """연결되지 않은 상태에서는 None을 반환한다."""
+        storage._connected = False
+        storage._pool = None
+
+        signal = await storage.get_technical_signal(signal_name="macd", signal_type="crossover")
+
+        assert signal is None

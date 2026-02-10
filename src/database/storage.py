@@ -1,6 +1,8 @@
 import importlib
 import logging
 
+from src.strategies.codes import SignalDirection, SignalStrength, SignalType
+from src.strategies.models import TechnicalSignal
 from src.trading.exchanges.upbit.codes import OrderSide, OrderType, SelfMatchPreventionType, TimeInForce
 from src.trading.exchanges.upbit.codes.order_state import OrderState
 from src.trading.exchanges.upbit.models import Order
@@ -235,4 +237,69 @@ class DataStorage:
             smp_type=SelfMatchPreventionType(row.get("smp_type", None)),
             prevented_volume=row["prevented_volume"],
             prevented_locked=row["prevented_locked"],
+        )
+
+    # ========================================================================
+    # TECHNICAL SIGNAL OPERATIONS
+    # ========================================================================
+
+    async def save_technical_signal(self, technical_signal: TechnicalSignal):
+        if not self.is_connected:
+            return
+
+        sql = """
+        INSERT INTO analytics.technical_signals (signal_name,
+                                         signal_type,
+                                         signal_value,
+                                         signal_strength,
+                                         signal_direction)
+        VALUES ($1, $2, $3, $4, $5)
+        ON CONFLICT
+            DO UPDATE SET signal_name = $1,
+                          signal_type = $2,
+                          signal_value = $3,
+                          signal_strength = $4,
+                          signal_direction = $5,
+                          last_updated_at = NOW();
+        """
+
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                sql,
+                technical_signal.signal_name,
+                technical_signal.signal_type,
+                technical_signal.signal_value,
+                technical_signal.signal_strength,
+                technical_signal.signal_direction,
+            )
+
+    async def get_technical_signal(self, signal_name: str, signal_type: str):
+        if not self.is_connected:
+            return None
+
+        sql = """
+        SELECT t.signal_name,
+               t.signal_type,
+               t.signal_value,
+               t.signal_strength,
+               t.signal_direction,
+               t.created_at,
+               t.last_updated_at
+        FROM analytics.technical_signals AS t
+        WHERE t.signal_name = $1
+          AND t.signal_type = $2;
+        """
+
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(sql, signal_name, signal_type)
+
+        if row is None:
+            return None
+
+        return TechnicalSignal(
+            signal_name=row["signal_name"],
+            signal_type=SignalType(row["signal_type"]),
+            signal_value=row["signal_value"],
+            signal_strength=SignalStrength(row["signal_strength"]),
+            signal_direction=SignalDirection(row["signal_direction"]),
         )

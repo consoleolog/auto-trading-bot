@@ -2,13 +2,14 @@ import hashlib
 import importlib
 import logging
 import uuid
+from decimal import Decimal
 from urllib.parse import unquote, urlencode
 
 import jwt
 
 from src.trading.exchanges.upbit import error_handler
-from src.trading.exchanges.upbit.codes import Timeframe
-from src.trading.exchanges.upbit.models import Candle, Ticker
+from src.trading.exchanges.upbit.codes import OrderSide, OrderType, SelfMatchPreventionType, Timeframe, TimeInForce
+from src.trading.exchanges.upbit.models import Candle, Order, Ticker
 from src.utils import rate_limit, retry_async
 
 try:
@@ -157,3 +158,117 @@ class UpbitExecutor:
         """
         tickers = await self.get_tickers(markets=[market])
         return tickers[0]
+
+    # ========================================================================
+    # ORDER OPERATIONS
+    # ========================================================================
+
+    @rate_limit(calls=7)
+    @retry_async(max_retries=2)
+    async def create_order(
+        self,
+        market: str,
+        side: OrderSide,
+        ord_type: OrderType,
+        volume: Decimal | None = None,
+        price: Decimal | None = None,
+        time_in_force: TimeInForce | None = None,
+        smp_type: SelfMatchPreventionType | None = None,
+        identifier: str | None = None,
+    ) -> Order:
+        params = {"market": market, "side": side.value, "ord_type": ord_type.value}
+
+        if volume:
+            params["volume"] = volume.to_eng_string()
+        if price:
+            params["price"] = price.to_eng_string()
+        if time_in_force:
+            params["time_in_force"] = time_in_force.value
+            if time_in_force == TimeInForce.POST_ONLY and smp_type is not None:
+                raise ValueError("`post_only` 옵션은 `smp_type` 옵션과 함께 사용할 수 없습니다.")
+        if identifier:
+            params["identifier"] = identifier
+        if smp_type:
+            params["smp_type"] = smp_type.value
+
+        endpoint = f"/orders{'/test' if self.test else ''}"
+
+        response = await self._request("POST", endpoint, params, signed=True)
+        order = Order.from_response(response)
+        return order
+
+    async def limit_order(
+        self,
+        market: str,
+        side: OrderSide,
+        volume: Decimal | None = None,
+        price: Decimal | None = None,
+        time_in_force: TimeInForce | None = None,
+        smp_type: SelfMatchPreventionType | None = None,
+        identifier: str | None = None,
+    ) -> Order:
+        """지정가 매도 매수 주문"""
+        return await self.create_order(
+            market,
+            side,
+            ord_type=OrderType.LIMIT,
+            volume=volume,
+            price=price,
+            time_in_force=time_in_force,
+            smp_type=smp_type,
+            identifier=identifier,
+        )
+
+    async def market_order(
+        self,
+        market: str,
+        volume: Decimal,
+        smp_type: SelfMatchPreventionType | None = None,
+        identifier: str | None = None,
+    ) -> Order:
+        """시장가 매도 주문"""
+        return await self.create_order(
+            market,
+            side=OrderSide.ASK,
+            ord_type=OrderType.MARKET,
+            volume=volume,
+            smp_type=smp_type,
+            identifier=identifier,
+        )
+
+    async def price_order(
+        self,
+        market: str,
+        price: Decimal,
+        smp_type: SelfMatchPreventionType | None = None,
+        identifier: str | None = None,
+    ) -> Order:
+        """시장가 매수 주문"""
+        return await self.create_order(
+            market, side=OrderSide.BID, ord_type=OrderType.PRICE, price=price, smp_type=smp_type, identifier=identifier
+        )
+
+    async def best_order(
+        self,
+        market: str,
+        side: OrderSide,
+        time_in_force: TimeInForce,
+        price: Decimal | None = None,
+        volume: Decimal | None = None,
+        smp_type: SelfMatchPreventionType | None = None,
+        identifier: str | None = None,
+    ) -> Order:
+        """최유리 지정가 매도 매수 주문"""
+        if time_in_force is None:
+            raise ValueError("최유리 지정가 주문에서는 `time_in_force` 는 필수값 입니다!")
+
+        return await self.create_order(
+            market,
+            side,
+            ord_type=OrderType.BEST,
+            price=price,
+            volume=volume,
+            time_in_force=time_in_force,
+            smp_type=smp_type,
+            identifier=identifier,
+        )

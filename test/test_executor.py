@@ -6,7 +6,14 @@ from urllib.parse import unquote, urlencode
 import jwt
 import pytest
 
-from src.trading.exchanges.upbit.codes import PriceChangeState, Timeframe
+from src.trading.exchanges.upbit.codes import (
+    OrderSide,
+    OrderType,
+    PriceChangeState,
+    SelfMatchPreventionType,
+    Timeframe,
+    TimeInForce,
+)
 from src.trading.exchanges.upbit.executor import UpbitExecutor
 
 # ============= Fixtures =============
@@ -653,3 +660,441 @@ class TestGetTicker:
             result = await executor.get_ticker("KRW-BTC")
 
         assert result is first
+
+
+# ============= create_order =============
+
+SAMPLE_ORDER_RESPONSE = {
+    "market": "KRW-BTC",
+    "uuid": "550e8400-e29b-41d4-a716-446655440000",
+    "side": "bid",
+    "ord_type": "limit",
+    "price": "50000000",
+    "state": "wait",
+    "created_at": "2025-06-24T13:56:53+09:00",
+    "volume": "0.001",
+    "remaining_volume": "0.001",
+    "executed_volume": "0",
+    "reserved_fee": "25000",
+    "remaining_fee": "25000",
+    "paid_fee": "0",
+    "locked": "50025000",
+    "trades_count": 0,
+    "time_in_force": "ioc",
+    "identifier": "my-order-1",
+    "smp_type": "cancel_maker",
+    "prevented_volume": "0",
+    "prevented_locked": "0",
+}
+
+
+class TestCreateOrder:
+    @pytest.mark.asyncio
+    async def test_returns_order(self, executor: UpbitExecutor):
+        """응답 데이터를 Order 객체로 변환하여 반환한다."""
+        with patch.object(executor, "_request", new_callable=AsyncMock) as mock_req:
+            mock_req.return_value = SAMPLE_ORDER_RESPONSE.copy()
+
+            result = await executor.create_order(
+                market="KRW-BTC",
+                side=OrderSide.BID,
+                ord_type=OrderType.LIMIT,
+                volume=Decimal("0.001"),
+                price=Decimal("50000000"),
+            )
+
+        assert result.market == "KRW-BTC"
+        assert result.uuid == "550e8400-e29b-41d4-a716-446655440000"
+
+    @pytest.mark.asyncio
+    async def test_uses_post_method(self, executor: UpbitExecutor):
+        """POST 메서드로 요청한다."""
+        with patch.object(executor, "_request", new_callable=AsyncMock) as mock_req:
+            mock_req.return_value = SAMPLE_ORDER_RESPONSE.copy()
+
+            await executor.create_order(
+                market="KRW-BTC",
+                side=OrderSide.BID,
+                ord_type=OrderType.LIMIT,
+            )
+
+        assert mock_req.call_args[0][0] == "POST"
+
+    @pytest.mark.asyncio
+    async def test_test_mode_uses_test_endpoint(self, executor: UpbitExecutor):
+        """test=True이면 /orders/test 엔드포인트를 사용한다."""
+        assert executor.test is True
+
+        with patch.object(executor, "_request", new_callable=AsyncMock) as mock_req:
+            mock_req.return_value = SAMPLE_ORDER_RESPONSE.copy()
+
+            await executor.create_order(
+                market="KRW-BTC",
+                side=OrderSide.BID,
+                ord_type=OrderType.LIMIT,
+            )
+
+        assert mock_req.call_args[0][1] == "/orders/test"
+
+    @pytest.mark.asyncio
+    async def test_production_mode_uses_orders_endpoint(self):
+        """test=False이면 /orders 엔드포인트를 사용한다."""
+        executor = UpbitExecutor(
+            api_key="test-key",
+            api_secret="test-secret-key-that-is-long-enough-for-hs256",
+            test=False,
+        )
+
+        with patch.object(executor, "_request", new_callable=AsyncMock) as mock_req:
+            mock_req.return_value = SAMPLE_ORDER_RESPONSE.copy()
+
+            await executor.create_order(
+                market="KRW-BTC",
+                side=OrderSide.BID,
+                ord_type=OrderType.LIMIT,
+            )
+
+        assert mock_req.call_args[0][1] == "/orders"
+
+    @pytest.mark.asyncio
+    async def test_signed_request(self, executor: UpbitExecutor):
+        """signed=True로 요청한다."""
+        with patch.object(executor, "_request", new_callable=AsyncMock) as mock_req:
+            mock_req.return_value = SAMPLE_ORDER_RESPONSE.copy()
+
+            await executor.create_order(
+                market="KRW-BTC",
+                side=OrderSide.BID,
+                ord_type=OrderType.LIMIT,
+            )
+
+        assert mock_req.call_args[1]["signed"] is True
+
+    @pytest.mark.asyncio
+    async def test_required_params(self, executor: UpbitExecutor):
+        """market, side, ord_type가 params에 포함된다."""
+        with patch.object(executor, "_request", new_callable=AsyncMock) as mock_req:
+            mock_req.return_value = SAMPLE_ORDER_RESPONSE.copy()
+
+            await executor.create_order(
+                market="KRW-BTC",
+                side=OrderSide.BID,
+                ord_type=OrderType.LIMIT,
+            )
+
+        params = mock_req.call_args[0][2]
+        assert params["market"] == "KRW-BTC"
+        assert params["side"] == "bid"
+        assert params["ord_type"] == "limit"
+
+    @pytest.mark.asyncio
+    async def test_volume_included_when_specified(self, executor: UpbitExecutor):
+        """volume을 지정하면 params에 포함된다."""
+        with patch.object(executor, "_request", new_callable=AsyncMock) as mock_req:
+            mock_req.return_value = SAMPLE_ORDER_RESPONSE.copy()
+
+            await executor.create_order(
+                market="KRW-BTC",
+                side=OrderSide.BID,
+                ord_type=OrderType.LIMIT,
+                volume=Decimal("0.001"),
+            )
+
+        params = mock_req.call_args[0][2]
+        assert params["volume"] == "0.001"
+
+    @pytest.mark.asyncio
+    async def test_price_included_when_specified(self, executor: UpbitExecutor):
+        """price를 지정하면 params에 포함된다."""
+        with patch.object(executor, "_request", new_callable=AsyncMock) as mock_req:
+            mock_req.return_value = SAMPLE_ORDER_RESPONSE.copy()
+
+            await executor.create_order(
+                market="KRW-BTC",
+                side=OrderSide.BID,
+                ord_type=OrderType.LIMIT,
+                price=Decimal("50000000"),
+            )
+
+        params = mock_req.call_args[0][2]
+        assert params["price"] == "50000000"
+
+    @pytest.mark.asyncio
+    async def test_volume_excluded_when_none(self, executor: UpbitExecutor):
+        """volume이 None이면 params에 포함되지 않는다."""
+        with patch.object(executor, "_request", new_callable=AsyncMock) as mock_req:
+            mock_req.return_value = SAMPLE_ORDER_RESPONSE.copy()
+
+            await executor.create_order(
+                market="KRW-BTC",
+                side=OrderSide.BID,
+                ord_type=OrderType.LIMIT,
+            )
+
+        params = mock_req.call_args[0][2]
+        assert "volume" not in params
+
+    @pytest.mark.asyncio
+    async def test_price_excluded_when_none(self, executor: UpbitExecutor):
+        """price가 None이면 params에 포함되지 않는다."""
+        with patch.object(executor, "_request", new_callable=AsyncMock) as mock_req:
+            mock_req.return_value = SAMPLE_ORDER_RESPONSE.copy()
+
+            await executor.create_order(
+                market="KRW-BTC",
+                side=OrderSide.BID,
+                ord_type=OrderType.LIMIT,
+            )
+
+        params = mock_req.call_args[0][2]
+        assert "price" not in params
+
+    @pytest.mark.asyncio
+    async def test_time_in_force_included_when_specified(self, executor: UpbitExecutor):
+        """time_in_force를 지정하면 params에 포함된다."""
+        with patch.object(executor, "_request", new_callable=AsyncMock) as mock_req:
+            mock_req.return_value = SAMPLE_ORDER_RESPONSE.copy()
+
+            await executor.create_order(
+                market="KRW-BTC",
+                side=OrderSide.BID,
+                ord_type=OrderType.LIMIT,
+                time_in_force=TimeInForce.IOC,
+            )
+
+        params = mock_req.call_args[0][2]
+        assert params["time_in_force"] == "ioc"
+
+    @pytest.mark.asyncio
+    async def test_identifier_included_when_specified(self, executor: UpbitExecutor):
+        """identifier를 지정하면 params에 포함된다."""
+        with patch.object(executor, "_request", new_callable=AsyncMock) as mock_req:
+            mock_req.return_value = SAMPLE_ORDER_RESPONSE.copy()
+
+            await executor.create_order(
+                market="KRW-BTC",
+                side=OrderSide.BID,
+                ord_type=OrderType.LIMIT,
+                identifier="my-order-1",
+            )
+
+        params = mock_req.call_args[0][2]
+        assert params["identifier"] == "my-order-1"
+
+    @pytest.mark.asyncio
+    async def test_smp_type_included_when_specified(self, executor: UpbitExecutor):
+        """smp_type을 지정하면 params에 포함된다."""
+        with patch.object(executor, "_request", new_callable=AsyncMock) as mock_req:
+            mock_req.return_value = SAMPLE_ORDER_RESPONSE.copy()
+
+            await executor.create_order(
+                market="KRW-BTC",
+                side=OrderSide.BID,
+                ord_type=OrderType.LIMIT,
+                smp_type=SelfMatchPreventionType.CANCEL_MAKER,
+            )
+
+        params = mock_req.call_args[0][2]
+        assert params["smp_type"] == "cancel_maker"
+
+    @pytest.mark.asyncio
+    async def test_post_only_with_smp_type_raises_error(self, executor: UpbitExecutor):
+        """post_only와 smp_type을 함께 사용하면 ValueError가 발생한다."""
+        with patch.object(executor, "_request", new_callable=AsyncMock) as mock_req:
+            mock_req.return_value = SAMPLE_ORDER_RESPONSE.copy()
+
+            with pytest.raises(ValueError, match="post_only.*smp_type"):
+                await executor.create_order(
+                    market="KRW-BTC",
+                    side=OrderSide.BID,
+                    ord_type=OrderType.LIMIT,
+                    time_in_force=TimeInForce.POST_ONLY,
+                    smp_type=SelfMatchPreventionType.CANCEL_MAKER,
+                )
+
+
+# ============= limit_order =============
+
+
+class TestLimitOrder:
+    @pytest.mark.asyncio
+    async def test_delegates_to_create_order(self, executor: UpbitExecutor):
+        """create_order에 OrderType.LIMIT로 위임한다."""
+        with patch.object(executor, "create_order", new_callable=AsyncMock) as mock_create:
+            mock_create.return_value = MagicMock()
+
+            await executor.limit_order(
+                market="KRW-BTC",
+                side=OrderSide.BID,
+                volume=Decimal("0.001"),
+                price=Decimal("50000000"),
+            )
+
+        mock_create.assert_awaited_once_with(
+            "KRW-BTC",
+            OrderSide.BID,
+            ord_type=OrderType.LIMIT,
+            volume=Decimal("0.001"),
+            price=Decimal("50000000"),
+            time_in_force=None,
+            smp_type=None,
+            identifier=None,
+        )
+
+    @pytest.mark.asyncio
+    async def test_passes_optional_params(self, executor: UpbitExecutor):
+        """선택적 파라미터가 create_order에 전달된다."""
+        with patch.object(executor, "create_order", new_callable=AsyncMock) as mock_create:
+            mock_create.return_value = MagicMock()
+
+            await executor.limit_order(
+                market="KRW-BTC",
+                side=OrderSide.BID,
+                time_in_force=TimeInForce.IOC,
+                smp_type=SelfMatchPreventionType.CANCEL_TAKER,
+                identifier="test-id",
+            )
+
+        call_kwargs = mock_create.call_args
+        assert call_kwargs[1]["time_in_force"] == TimeInForce.IOC
+        assert call_kwargs[1]["smp_type"] == SelfMatchPreventionType.CANCEL_TAKER
+        assert call_kwargs[1]["identifier"] == "test-id"
+
+
+# ============= market_order =============
+
+
+class TestMarketOrder:
+    @pytest.mark.asyncio
+    async def test_delegates_to_create_order_with_ask_and_market(self, executor: UpbitExecutor):
+        """create_order에 OrderSide.ASK, OrderType.MARKET으로 위임한다."""
+        with patch.object(executor, "create_order", new_callable=AsyncMock) as mock_create:
+            mock_create.return_value = MagicMock()
+
+            await executor.market_order(market="KRW-BTC", volume=Decimal("0.5"))
+
+        mock_create.assert_awaited_once_with(
+            "KRW-BTC",
+            side=OrderSide.ASK,
+            ord_type=OrderType.MARKET,
+            volume=Decimal("0.5"),
+            smp_type=None,
+            identifier=None,
+        )
+
+    @pytest.mark.asyncio
+    async def test_passes_optional_params(self, executor: UpbitExecutor):
+        """선택적 파라미터가 create_order에 전달된다."""
+        with patch.object(executor, "create_order", new_callable=AsyncMock) as mock_create:
+            mock_create.return_value = MagicMock()
+
+            await executor.market_order(
+                market="KRW-BTC",
+                volume=Decimal("0.5"),
+                smp_type=SelfMatchPreventionType.REDUCE,
+                identifier="sell-1",
+            )
+
+        call_kwargs = mock_create.call_args
+        assert call_kwargs[1]["smp_type"] == SelfMatchPreventionType.REDUCE
+        assert call_kwargs[1]["identifier"] == "sell-1"
+
+
+# ============= price_order =============
+
+
+class TestPriceOrder:
+    @pytest.mark.asyncio
+    async def test_delegates_to_create_order_with_bid_and_price_type(self, executor: UpbitExecutor):
+        """create_order에 OrderSide.BID, OrderType.PRICE로 위임한다."""
+        with patch.object(executor, "create_order", new_callable=AsyncMock) as mock_create:
+            mock_create.return_value = MagicMock()
+
+            await executor.price_order(market="KRW-BTC", price=Decimal("100000"))
+
+        mock_create.assert_awaited_once_with(
+            "KRW-BTC",
+            side=OrderSide.BID,
+            ord_type=OrderType.PRICE,
+            price=Decimal("100000"),
+            smp_type=None,
+            identifier=None,
+        )
+
+    @pytest.mark.asyncio
+    async def test_passes_optional_params(self, executor: UpbitExecutor):
+        """선택적 파라미터가 create_order에 전달된다."""
+        with patch.object(executor, "create_order", new_callable=AsyncMock) as mock_create:
+            mock_create.return_value = MagicMock()
+
+            await executor.price_order(
+                market="KRW-BTC",
+                price=Decimal("100000"),
+                smp_type=SelfMatchPreventionType.CANCEL_MAKER,
+                identifier="buy-1",
+            )
+
+        call_kwargs = mock_create.call_args
+        assert call_kwargs[1]["smp_type"] == SelfMatchPreventionType.CANCEL_MAKER
+        assert call_kwargs[1]["identifier"] == "buy-1"
+
+
+# ============= best_order =============
+
+
+class TestBestOrder:
+    @pytest.mark.asyncio
+    async def test_delegates_to_create_order_with_best_type(self, executor: UpbitExecutor):
+        """create_order에 OrderType.BEST로 위임한다."""
+        with patch.object(executor, "create_order", new_callable=AsyncMock) as mock_create:
+            mock_create.return_value = MagicMock()
+
+            await executor.best_order(
+                market="KRW-BTC",
+                side=OrderSide.BID,
+                time_in_force=TimeInForce.IOC,
+                volume=Decimal("0.001"),
+            )
+
+        mock_create.assert_awaited_once_with(
+            "KRW-BTC",
+            OrderSide.BID,
+            ord_type=OrderType.BEST,
+            price=None,
+            volume=Decimal("0.001"),
+            time_in_force=TimeInForce.IOC,
+            smp_type=None,
+            identifier=None,
+        )
+
+    @pytest.mark.asyncio
+    async def test_raises_error_when_time_in_force_is_none(self, executor: UpbitExecutor):
+        """time_in_force가 None이면 ValueError가 발생한다."""
+        with pytest.raises(ValueError, match="time_in_force"):
+            await executor.best_order(
+                market="KRW-BTC",
+                side=OrderSide.BID,
+                time_in_force=None,
+            )
+
+    @pytest.mark.asyncio
+    async def test_passes_all_optional_params(self, executor: UpbitExecutor):
+        """모든 선택적 파라미터가 create_order에 전달된다."""
+        with patch.object(executor, "create_order", new_callable=AsyncMock) as mock_create:
+            mock_create.return_value = MagicMock()
+
+            await executor.best_order(
+                market="KRW-BTC",
+                side=OrderSide.ASK,
+                time_in_force=TimeInForce.FOK,
+                price=Decimal("50000000"),
+                volume=Decimal("0.001"),
+                smp_type=SelfMatchPreventionType.CANCEL_TAKER,
+                identifier="best-1",
+            )
+
+        call_kwargs = mock_create.call_args
+        assert call_kwargs[1]["price"] == Decimal("50000000")
+        assert call_kwargs[1]["volume"] == Decimal("0.001")
+        assert call_kwargs[1]["smp_type"] == SelfMatchPreventionType.CANCEL_TAKER
+        assert call_kwargs[1]["identifier"] == "best-1"

@@ -355,3 +355,591 @@ class TestCompositeRiskRule:
         # priority가 가장 낮은(10) MaxDrawdownRule이 먼저 실패해야 함
         assert result is not None
         assert result.rule_name == "MaxDrawdownRule"
+
+
+# ============= 실제 규칙 구현 테스트 =============
+
+
+class TestDailyLossLimitRule:
+    """DailyLossLimitRule 테스트"""
+
+    def test_daily_loss_rule_passes_when_within_threshold(self):
+        """일일 손실이 임계값 내에 있으면 통과한다."""
+        from src.risk.rules.daily_loss_rule import DailyLossLimitRule
+
+        context = RiskContext(
+            system_state="RUNNING",
+            mode="LIVE",
+            open_positions_count=1,
+            total_position_value_krw=Decimal("10000000"),
+            portfolio_value_krw=Decimal("49000000"),
+            starting_capital_krw=Decimal("50000000"),
+            daily_pnl_krw=Decimal("-1000000"),
+            daily_pnl_percent=Decimal("-2"),  # -2% loss (< 3% warning)
+            weekly_pnl_krw=Decimal("-1000000"),
+            weekly_pnl_percent=Decimal("-2"),
+            peak_portfolio_value_krw=Decimal("50000000"),
+            current_drawdown_percent=Decimal("2"),
+        )
+
+        rule = DailyLossLimitRule()
+        result = rule.evaluate(context)
+
+        assert result is None
+
+    def test_daily_loss_rule_warns_at_warning_threshold(self):
+        """일일 손실이 경고 임계값을 초과하면 WARNING을 반환한다."""
+        from src.risk.rules.daily_loss_rule import DailyLossLimitRule
+
+        context = RiskContext(
+            system_state="RUNNING",
+            mode="LIVE",
+            open_positions_count=1,
+            total_position_value_krw=Decimal("10000000"),
+            portfolio_value_krw=Decimal("46500000"),
+            starting_capital_krw=Decimal("50000000"),
+            daily_pnl_krw=Decimal("-1750000"),
+            daily_pnl_percent=Decimal("-3.5"),  # -3.5% loss (>= 3% warning)
+            weekly_pnl_krw=Decimal("-3500000"),
+            weekly_pnl_percent=Decimal("-7"),
+            peak_portfolio_value_krw=Decimal("50000000"),
+            current_drawdown_percent=Decimal("7"),
+        )
+
+        rule = DailyLossLimitRule(warning_threshold=Decimal("3"), critical_threshold=Decimal("5"))
+        result = rule.evaluate(context)
+
+        assert result is not None
+        assert result.rule_name == "DailyLossLimitRule"
+        assert result.severity == RiskSeverity.WARNING
+        assert "3.5" in result.message
+        assert "근접" in result.message
+
+    def test_daily_loss_rule_critical_at_critical_threshold(self):
+        """일일 손실이 임계 임계값을 초과하면 CRITICAL을 반환한다."""
+        from src.risk.rules.daily_loss_rule import DailyLossLimitRule
+
+        context = RiskContext(
+            system_state="RUNNING",
+            mode="LIVE",
+            open_positions_count=1,
+            total_position_value_krw=Decimal("5000000"),
+            portfolio_value_krw=Decimal("44000000"),
+            starting_capital_krw=Decimal("50000000"),
+            daily_pnl_krw=Decimal("-3000000"),
+            daily_pnl_percent=Decimal("-6"),  # -6% loss (>= 5% critical)
+            weekly_pnl_krw=Decimal("-6000000"),
+            weekly_pnl_percent=Decimal("-12"),
+            peak_portfolio_value_krw=Decimal("50000000"),
+            current_drawdown_percent=Decimal("12"),
+        )
+
+        rule = DailyLossLimitRule(warning_threshold=Decimal("3"), critical_threshold=Decimal("5"))
+        result = rule.evaluate(context)
+
+        assert result is not None
+        assert result.rule_name == "DailyLossLimitRule"
+        assert result.severity == RiskSeverity.CRITICAL
+        assert "6.0" in result.message
+        assert "초과" in result.message
+        assert "거래 중단" in result.suggested_action
+
+
+class TestWeeklyLossLimitRule:
+    """WeeklyLossLimitRule 테스트"""
+
+    def test_weekly_loss_rule_passes_when_within_threshold(self):
+        """주간 손실이 임계값 내에 있으면 통과한다."""
+        from src.risk.rules.weekly_loss_rule import WeeklyLossLimitRule
+
+        context = RiskContext(
+            system_state="RUNNING",
+            mode="LIVE",
+            open_positions_count=1,
+            total_position_value_krw=Decimal("10000000"),
+            portfolio_value_krw=Decimal("47000000"),
+            starting_capital_krw=Decimal("50000000"),
+            daily_pnl_krw=Decimal("-500000"),
+            daily_pnl_percent=Decimal("-1"),
+            weekly_pnl_krw=Decimal("-3000000"),
+            weekly_pnl_percent=Decimal("-6"),  # -6% loss (< 7% warning)
+            peak_portfolio_value_krw=Decimal("50000000"),
+            current_drawdown_percent=Decimal("6"),
+        )
+
+        rule = WeeklyLossLimitRule()
+        result = rule.evaluate(context)
+
+        assert result is None
+
+    def test_weekly_loss_rule_warns_at_warning_threshold(self):
+        """주간 손실이 경고 임계값을 초과하면 WARNING을 반환한다."""
+        from src.risk.rules.weekly_loss_rule import WeeklyLossLimitRule
+
+        context = RiskContext(
+            system_state="RUNNING",
+            mode="LIVE",
+            open_positions_count=1,
+            total_position_value_krw=Decimal("10000000"),
+            portfolio_value_krw=Decimal("46000000"),
+            starting_capital_krw=Decimal("50000000"),
+            daily_pnl_krw=Decimal("-1000000"),
+            daily_pnl_percent=Decimal("-2"),
+            weekly_pnl_krw=Decimal("-4000000"),
+            weekly_pnl_percent=Decimal("-8"),  # -8% loss (>= 7% warning)
+            peak_portfolio_value_krw=Decimal("50000000"),
+            current_drawdown_percent=Decimal("8"),
+        )
+
+        rule = WeeklyLossLimitRule(warning_threshold=Decimal("7"), critical_threshold=Decimal("10"))
+        result = rule.evaluate(context)
+
+        assert result is not None
+        assert result.rule_name == "WeeklyLossLimitRule"
+        assert result.severity == RiskSeverity.WARNING
+        assert "8.0" in result.message
+        assert "50%" in result.suggested_action
+
+    def test_weekly_loss_rule_critical_at_critical_threshold(self):
+        """주간 손실이 임계 임계값을 초과하면 CRITICAL을 반환한다."""
+        from src.risk.rules.weekly_loss_rule import WeeklyLossLimitRule
+
+        context = RiskContext(
+            system_state="RUNNING",
+            mode="LIVE",
+            open_positions_count=1,
+            total_position_value_krw=Decimal("5000000"),
+            portfolio_value_krw=Decimal("43500000"),
+            starting_capital_krw=Decimal("50000000"),
+            daily_pnl_krw=Decimal("-1500000"),
+            daily_pnl_percent=Decimal("-3"),
+            weekly_pnl_krw=Decimal("-6500000"),
+            weekly_pnl_percent=Decimal("-13"),  # -13% loss (>= 10% critical)
+            peak_portfolio_value_krw=Decimal("50000000"),
+            current_drawdown_percent=Decimal("13"),
+        )
+
+        rule = WeeklyLossLimitRule(warning_threshold=Decimal("7"), critical_threshold=Decimal("10"))
+        result = rule.evaluate(context)
+
+        assert result is not None
+        assert result.rule_name == "WeeklyLossLimitRule"
+        assert result.severity == RiskSeverity.CRITICAL
+        assert "13.0" in result.message
+        assert "25%" in result.suggested_action
+
+
+class TestMaxDrawdownRuleActual:
+    """실제 MaxDrawdownRule 테스트"""
+
+    def test_max_drawdown_rule_passes_when_within_threshold(self):
+        """드로다운이 임계값 내에 있으면 통과한다."""
+        from src.risk.rules.max_drawdown_rule import MaxDrawdownRule
+
+        context = RiskContext(
+            system_state="RUNNING",
+            mode="LIVE",
+            open_positions_count=1,
+            total_position_value_krw=Decimal("10000000"),
+            portfolio_value_krw=Decimal("46000000"),
+            starting_capital_krw=Decimal("50000000"),
+            daily_pnl_krw=Decimal("-500000"),
+            daily_pnl_percent=Decimal("-1"),
+            weekly_pnl_krw=Decimal("-4000000"),
+            weekly_pnl_percent=Decimal("-8"),
+            peak_portfolio_value_krw=Decimal("50000000"),
+            current_drawdown_percent=Decimal("8"),  # 8% (< 10% warning)
+        )
+
+        rule = MaxDrawdownRule()
+        result = rule.evaluate(context)
+
+        assert result is None
+
+    def test_max_drawdown_rule_warns_at_warning_threshold(self):
+        """드로다운이 경고 임계값을 초과하면 WARNING을 반환한다."""
+        from src.risk.rules.max_drawdown_rule import MaxDrawdownRule
+
+        context = RiskContext(
+            system_state="RUNNING",
+            mode="LIVE",
+            open_positions_count=1,
+            total_position_value_krw=Decimal("10000000"),
+            portfolio_value_krw=Decimal("44000000"),
+            starting_capital_krw=Decimal("50000000"),
+            daily_pnl_krw=Decimal("-1000000"),
+            daily_pnl_percent=Decimal("-2"),
+            weekly_pnl_krw=Decimal("-6000000"),
+            weekly_pnl_percent=Decimal("-12"),
+            peak_portfolio_value_krw=Decimal("50000000"),
+            current_drawdown_percent=Decimal("12"),  # 12% (>= 10% warning)
+        )
+
+        rule = MaxDrawdownRule()
+        result = rule.evaluate(context)
+
+        assert result is not None
+        assert result.rule_name == "MaxDrawdownRule"
+        assert result.severity == RiskSeverity.WARNING
+        assert "12" in result.message
+        assert "50%" in result.suggested_action
+
+    def test_max_drawdown_rule_critical_at_critical_threshold(self):
+        """드로다운이 임계 임계값을 초과하면 CRITICAL을 반환한다."""
+        from src.risk.rules.max_drawdown_rule import MaxDrawdownRule
+
+        context = RiskContext(
+            system_state="RUNNING",
+            mode="LIVE",
+            open_positions_count=1,
+            total_position_value_krw=Decimal("8000000"),
+            portfolio_value_krw=Decimal("41000000"),
+            starting_capital_krw=Decimal("50000000"),
+            daily_pnl_krw=Decimal("-2000000"),
+            daily_pnl_percent=Decimal("-4"),
+            weekly_pnl_krw=Decimal("-9000000"),
+            weekly_pnl_percent=Decimal("-18"),
+            peak_portfolio_value_krw=Decimal("50000000"),
+            current_drawdown_percent=Decimal("18"),  # 18% (>= 15% critical)
+        )
+
+        rule = MaxDrawdownRule()
+        result = rule.evaluate(context)
+
+        assert result is not None
+        assert result.rule_name == "MaxDrawdownRule"
+        assert result.severity == RiskSeverity.CRITICAL
+        assert "18" in result.message
+        assert "신규 거래 금지" in result.suggested_action
+
+    def test_max_drawdown_rule_emergency_at_emergency_threshold(self):
+        """드로다운이 긴급 임계값을 초과하면 EMERGENCY를 반환한다."""
+        from src.risk.rules.max_drawdown_rule import MaxDrawdownRule
+
+        context = RiskContext(
+            system_state="RUNNING",
+            mode="LIVE",
+            open_positions_count=1,
+            total_position_value_krw=Decimal("5000000"),
+            portfolio_value_krw=Decimal("38000000"),
+            starting_capital_krw=Decimal("50000000"),
+            daily_pnl_krw=Decimal("-3000000"),
+            daily_pnl_percent=Decimal("-7"),
+            weekly_pnl_krw=Decimal("-12000000"),
+            weekly_pnl_percent=Decimal("-24"),
+            peak_portfolio_value_krw=Decimal("50000000"),
+            current_drawdown_percent=Decimal("24"),  # 24% (>= 20% emergency)
+        )
+
+        rule = MaxDrawdownRule()
+        result = rule.evaluate(context)
+
+        assert result is not None
+        assert result.rule_name == "MaxDrawdownRule"
+        assert result.severity == RiskSeverity.EMERGENCY
+        assert "24" in result.message
+        assert "모든 포지션 청산" in result.suggested_action
+
+
+class TestMaxPositionsRule:
+    """MaxPositionsRule 테스트"""
+
+    def test_max_positions_rule_passes_when_below_limit(self):
+        """포지션 수가 제한보다 적으면 통과한다."""
+        from src.risk.rules.max_positions_rule import MaxPositionsRule
+
+        context = RiskContext(
+            system_state="RUNNING",
+            mode="LIVE",
+            open_positions_count=2,
+            total_position_value_krw=Decimal("10000000"),
+            portfolio_value_krw=Decimal("50000000"),
+            starting_capital_krw=Decimal("50000000"),
+            daily_pnl_krw=Decimal("0"),
+            daily_pnl_percent=Decimal("0"),
+            weekly_pnl_krw=Decimal("0"),
+            weekly_pnl_percent=Decimal("0"),
+            peak_portfolio_value_krw=Decimal("50000000"),
+            current_drawdown_percent=Decimal("0"),
+        )
+
+        rule = MaxPositionsRule(max_positions=5)
+        result = rule.evaluate(context)
+
+        assert result is None
+
+    def test_max_positions_rule_info_when_near_limit(self):
+        """포지션 수가 제한에 근접하면 INFO를 반환한다."""
+        from src.risk.rules.max_positions_rule import MaxPositionsRule
+
+        context = RiskContext(
+            system_state="RUNNING",
+            mode="LIVE",
+            open_positions_count=4,  # max-1 = 4
+            total_position_value_krw=Decimal("20000000"),
+            portfolio_value_krw=Decimal("50000000"),
+            starting_capital_krw=Decimal("50000000"),
+            daily_pnl_krw=Decimal("0"),
+            daily_pnl_percent=Decimal("0"),
+            weekly_pnl_krw=Decimal("0"),
+            weekly_pnl_percent=Decimal("0"),
+            peak_portfolio_value_krw=Decimal("50000000"),
+            current_drawdown_percent=Decimal("0"),
+        )
+
+        rule = MaxPositionsRule(max_positions=5)
+        result = rule.evaluate(context)
+
+        assert result is not None
+        assert result.rule_name == "MaxPositionsRule"
+        assert result.severity == RiskSeverity.INFO
+        assert "4/5" in result.message
+
+    def test_max_positions_rule_critical_at_limit(self):
+        """포지션 수가 제한에 도달하면 CRITICAL을 반환한다."""
+        from src.risk.rules.max_positions_rule import MaxPositionsRule
+
+        context = RiskContext(
+            system_state="RUNNING",
+            mode="LIVE",
+            open_positions_count=5,  # max = 5
+            total_position_value_krw=Decimal("25000000"),
+            portfolio_value_krw=Decimal("50000000"),
+            starting_capital_krw=Decimal("50000000"),
+            daily_pnl_krw=Decimal("0"),
+            daily_pnl_percent=Decimal("0"),
+            weekly_pnl_krw=Decimal("0"),
+            weekly_pnl_percent=Decimal("0"),
+            peak_portfolio_value_krw=Decimal("50000000"),
+            current_drawdown_percent=Decimal("0"),
+        )
+
+        rule = MaxPositionsRule(max_positions=5)
+        result = rule.evaluate(context)
+
+        assert result is not None
+        assert result.rule_name == "MaxPositionsRule"
+        assert result.severity == RiskSeverity.CRITICAL
+        assert "기존 포지션 청산" in result.suggested_action
+
+
+class TestPortfolioExposureRule:
+    """PortfolioExposureRule 테스트"""
+
+    def test_portfolio_exposure_rule_passes_when_below_threshold(self):
+        """노출이 임계값 내에 있으면 통과한다."""
+        from src.risk.rules.portfolio_exposure_rule import PortfolioExposureRule
+
+        context = RiskContext(
+            system_state="RUNNING",
+            mode="LIVE",
+            open_positions_count=2,
+            total_position_value_krw=Decimal("10000000"),  # 20% exposure
+            portfolio_value_krw=Decimal("50000000"),
+            starting_capital_krw=Decimal("50000000"),
+            daily_pnl_krw=Decimal("0"),
+            daily_pnl_percent=Decimal("0"),
+            weekly_pnl_krw=Decimal("0"),
+            weekly_pnl_percent=Decimal("0"),
+            peak_portfolio_value_krw=Decimal("50000000"),
+            current_drawdown_percent=Decimal("0"),
+        )
+
+        rule = PortfolioExposureRule()
+        result = rule.evaluate(context)
+
+        assert result is None
+
+    def test_portfolio_exposure_rule_warns_at_warning_threshold(self):
+        """노출이 경고 임계값을 초과하면 WARNING을 반환한다."""
+        from src.risk.rules.portfolio_exposure_rule import PortfolioExposureRule
+
+        context = RiskContext(
+            system_state="RUNNING",
+            mode="LIVE",
+            open_positions_count=3,
+            total_position_value_krw=Decimal("16000000"),  # 32% exposure
+            portfolio_value_krw=Decimal("50000000"),
+            starting_capital_krw=Decimal("50000000"),
+            daily_pnl_krw=Decimal("0"),
+            daily_pnl_percent=Decimal("0"),
+            weekly_pnl_krw=Decimal("0"),
+            weekly_pnl_percent=Decimal("0"),
+            peak_portfolio_value_krw=Decimal("50000000"),
+            current_drawdown_percent=Decimal("0"),
+        )
+
+        rule = PortfolioExposureRule()
+        result = rule.evaluate(context)
+
+        assert result is not None
+        assert result.rule_name == "PortfolioExposureRule"
+        assert result.severity == RiskSeverity.WARNING
+        assert "32" in result.message
+
+    def test_portfolio_exposure_rule_critical_at_max_exposure(self):
+        """노출이 최대 임계값을 초과하면 CRITICAL을 반환한다."""
+        from src.risk.rules.portfolio_exposure_rule import PortfolioExposureRule
+
+        context = RiskContext(
+            system_state="RUNNING",
+            mode="LIVE",
+            open_positions_count=4,
+            total_position_value_krw=Decimal("22000000"),  # 44% exposure
+            portfolio_value_krw=Decimal("50000000"),
+            starting_capital_krw=Decimal("50000000"),
+            daily_pnl_krw=Decimal("0"),
+            daily_pnl_percent=Decimal("0"),
+            weekly_pnl_krw=Decimal("0"),
+            weekly_pnl_percent=Decimal("0"),
+            peak_portfolio_value_krw=Decimal("50000000"),
+            current_drawdown_percent=Decimal("0"),
+        )
+
+        rule = PortfolioExposureRule()
+        result = rule.evaluate(context)
+
+        assert result is not None
+        assert result.rule_name == "PortfolioExposureRule"
+        assert result.severity == RiskSeverity.CRITICAL
+        assert "44" in result.message
+        assert "신규 포지션 금지" in result.suggested_action
+
+
+class TestPositionSizeRule:
+    """PositionSizeRule 테스트"""
+
+    def test_position_size_rule_passes_when_below_threshold(self):
+        """거래 리스크가 임계값 내에 있으면 통과한다."""
+        from src.risk.rules.position_size_rule import PositionSizeRule
+
+        context = RiskContext(
+            system_state="RUNNING",
+            mode="LIVE",
+            open_positions_count=1,
+            total_position_value_krw=Decimal("10000000"),
+            portfolio_value_krw=Decimal("50000000"),
+            starting_capital_krw=Decimal("50000000"),
+            daily_pnl_krw=Decimal("0"),
+            daily_pnl_percent=Decimal("0"),
+            weekly_pnl_krw=Decimal("0"),
+            weekly_pnl_percent=Decimal("0"),
+            peak_portfolio_value_krw=Decimal("50000000"),
+            current_drawdown_percent=Decimal("0"),
+            proposed_trade_risk_percent=Decimal("1.0"),  # 1% risk
+        )
+
+        rule = PositionSizeRule()
+        result = rule.evaluate(context)
+
+        assert result is None
+
+    def test_position_size_rule_returns_none_when_no_proposed_trade(self):
+        """제안된 거래가 없으면 None을 반환한다."""
+        from src.risk.rules.position_size_rule import PositionSizeRule
+
+        context = RiskContext(
+            system_state="RUNNING",
+            mode="LIVE",
+            open_positions_count=1,
+            total_position_value_krw=Decimal("10000000"),
+            portfolio_value_krw=Decimal("50000000"),
+            starting_capital_krw=Decimal("50000000"),
+            daily_pnl_krw=Decimal("0"),
+            daily_pnl_percent=Decimal("0"),
+            weekly_pnl_krw=Decimal("0"),
+            weekly_pnl_percent=Decimal("0"),
+            peak_portfolio_value_krw=Decimal("50000000"),
+            current_drawdown_percent=Decimal("0"),
+            proposed_trade_risk_percent=None,
+        )
+
+        rule = PositionSizeRule()
+        result = rule.evaluate(context)
+
+        assert result is None
+
+    def test_position_size_rule_info_at_warning_threshold(self):
+        """거래 리스크가 경고 임계값을 초과하면 INFO를 반환한다."""
+        from src.risk.rules.position_size_rule import PositionSizeRule
+
+        context = RiskContext(
+            system_state="RUNNING",
+            mode="LIVE",
+            open_positions_count=1,
+            total_position_value_krw=Decimal("10000000"),
+            portfolio_value_krw=Decimal("50000000"),
+            starting_capital_krw=Decimal("50000000"),
+            daily_pnl_krw=Decimal("0"),
+            daily_pnl_percent=Decimal("0"),
+            weekly_pnl_krw=Decimal("0"),
+            weekly_pnl_percent=Decimal("0"),
+            peak_portfolio_value_krw=Decimal("50000000"),
+            current_drawdown_percent=Decimal("0"),
+            proposed_trade_risk_percent=Decimal("1.7"),  # 1.7% risk (>= 1.5% warning)
+        )
+
+        rule = PositionSizeRule()
+        result = rule.evaluate(context)
+
+        assert result is not None
+        assert result.rule_name == "PositionSizeRule"
+        assert result.severity == RiskSeverity.INFO
+        assert "1.7" in result.message
+
+    def test_position_size_rule_warns_at_max_risk(self):
+        """거래 리스크가 최대 리스크를 초과하면 WARNING을 반환한다."""
+        from src.risk.rules.position_size_rule import PositionSizeRule
+
+        context = RiskContext(
+            system_state="RUNNING",
+            mode="LIVE",
+            open_positions_count=1,
+            total_position_value_krw=Decimal("10000000"),
+            portfolio_value_krw=Decimal("50000000"),
+            starting_capital_krw=Decimal("50000000"),
+            daily_pnl_krw=Decimal("0"),
+            daily_pnl_percent=Decimal("0"),
+            weekly_pnl_krw=Decimal("0"),
+            weekly_pnl_percent=Decimal("0"),
+            peak_portfolio_value_krw=Decimal("50000000"),
+            current_drawdown_percent=Decimal("0"),
+            proposed_trade_risk_percent=Decimal("2.5"),  # 2.5% risk (>= 2% max)
+        )
+
+        rule = PositionSizeRule()
+        result = rule.evaluate(context)
+
+        assert result is not None
+        assert result.rule_name == "PositionSizeRule"
+        assert result.severity == RiskSeverity.WARNING
+        assert "2.5" in result.message
+
+    def test_position_size_rule_critical_at_hard_limit(self):
+        """거래 리스크가 절대 한도를 초과하면 CRITICAL을 반환한다."""
+        from src.risk.rules.position_size_rule import PositionSizeRule
+
+        context = RiskContext(
+            system_state="RUNNING",
+            mode="LIVE",
+            open_positions_count=1,
+            total_position_value_krw=Decimal("10000000"),
+            portfolio_value_krw=Decimal("50000000"),
+            starting_capital_krw=Decimal("50000000"),
+            daily_pnl_krw=Decimal("0"),
+            daily_pnl_percent=Decimal("0"),
+            weekly_pnl_krw=Decimal("0"),
+            weekly_pnl_percent=Decimal("0"),
+            peak_portfolio_value_krw=Decimal("50000000"),
+            current_drawdown_percent=Decimal("0"),
+            proposed_trade_risk_percent=Decimal("3.5"),  # 3.5% risk (>= 3% hard limit)
+        )
+
+        rule = PositionSizeRule()
+        result = rule.evaluate(context)
+
+        assert result is not None
+        assert result.rule_name == "PositionSizeRule"
+        assert result.severity == RiskSeverity.CRITICAL
+        assert "3.5" in result.message
+        assert "절대 한도" in result.message

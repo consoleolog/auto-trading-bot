@@ -8,7 +8,7 @@ import jwt
 
 from src.trading.exchanges.upbit import error_handler
 from src.trading.exchanges.upbit.codes import Timeframe
-from src.trading.exchanges.upbit.models import Candle
+from src.trading.exchanges.upbit.models import Candle, Ticker
 from src.utils import rate_limit, retry_async
 
 try:
@@ -132,3 +132,28 @@ class UpbitExecutor:
         # response 는 최신 -> 과거 데이터이기 때문에 슬라이싱으로 과거 -> 최신으로 정렬
         candles = [Candle.from_response(r) for r in response[::-1]]
         return candles
+
+    @rate_limit(calls=9)
+    @retry_async(max_retries=3)
+    async def get_tickers(self, markets: list[str]) -> list[Ticker]:
+        """
+        지정한 페어의 현재가를 조회합니다.
+        요청 시점 기준으로 해당 페어의 티커 스냅샷이 반환됩니다.
+
+        Args:
+            markets: 조회하고자 하는 페어(거래쌍) 목록.
+        """
+        params = {"markets": ",".join(markets)}
+        response = await self._request("GET", "/ticker", params=params)
+        tickers = [Ticker.from_response(r) for r in response]
+        return tickers
+
+    async def get_ticker(self, market: str) -> Ticker:
+        """
+        현재가 조회
+
+        Args:
+            market: 조회하고자 하는 페어 코드
+        """
+        tickers = await self.get_tickers(markets=[market])
+        return tickers[0]

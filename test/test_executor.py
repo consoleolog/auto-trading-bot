@@ -6,7 +6,7 @@ from urllib.parse import unquote, urlencode
 import jwt
 import pytest
 
-from src.trading.exchanges.upbit.codes import Timeframe
+from src.trading.exchanges.upbit.codes import PriceChangeState, Timeframe
 from src.trading.exchanges.upbit.executor import UpbitExecutor
 
 # ============= Fixtures =============
@@ -492,3 +492,164 @@ class TestGetCandles:
         assert len(result) == 2
         assert result[0].trade_price == Decimal("51000000")
         assert result[1].trade_price == Decimal("50500000")
+
+
+# ============= get_tickers =============
+
+SAMPLE_TICKER_RESPONSE = {
+    "market": "KRW-BTC",
+    "trade_date": "20250624",
+    "trade_time": "153045",
+    "trade_date_kst": "20250625",
+    "trade_time_kst": "003045",
+    "trade_timestamp": 1719244245000,
+    "opening_price": 50000000,
+    "high_price": 51000000,
+    "low_price": 49000000,
+    "trade_price": 50500000,
+    "prev_closing_price": 49800000,
+    "change": "RISE",
+    "change_price": 700000,
+    "change_rate": 0.014,
+    "response": 0.014,
+    "signed_change_price": 700000,
+    "signed_change_rate": 0.014,
+    "trade_volume": 0.5,
+    "acc_trade_price": 1000000000,
+    "acc_trade_price_24h": 2500000000,
+    "acc_trade_volume": 20.5,
+    "acc_trade_volume_24h": 50.3,
+    "highest_52_week_price": 60000000,
+    "highest_52_week_date": "2025-03-15",
+    "lowest_52_week_price": 30000000,
+    "lowest_52_week_date": "2024-09-10",
+    "timestamp": 1719244245000,
+}
+
+
+class TestGetTickers:
+    @pytest.mark.asyncio
+    async def test_returns_ticker_list(self, executor: UpbitExecutor):
+        """응답 데이터를 Ticker 객체 리스트로 변환하여 반환한다."""
+        with patch.object(executor, "_request", new_callable=AsyncMock) as mock_req:
+            mock_req.return_value = [SAMPLE_TICKER_RESPONSE.copy()]
+
+            result = await executor.get_tickers(["KRW-BTC"])
+
+        assert len(result) == 1
+        assert result[0].market == "KRW-BTC"
+        assert result[0].trade_price == Decimal("50500000")
+
+    @pytest.mark.asyncio
+    async def test_markets_joined_with_comma(self, executor: UpbitExecutor):
+        """markets 리스트가 쉼표로 결합되어 params에 포함된다."""
+        with patch.object(executor, "_request", new_callable=AsyncMock) as mock_req:
+            mock_req.return_value = []
+
+            await executor.get_tickers(["KRW-BTC", "KRW-ETH"])
+
+        params = mock_req.call_args[1]["params"]
+        assert params["markets"] == "KRW-BTC,KRW-ETH"
+
+    @pytest.mark.asyncio
+    async def test_single_market_in_params(self, executor: UpbitExecutor):
+        """단일 market이 쉼표 없이 params에 포함된다."""
+        with patch.object(executor, "_request", new_callable=AsyncMock) as mock_req:
+            mock_req.return_value = []
+
+            await executor.get_tickers(["KRW-BTC"])
+
+        params = mock_req.call_args[1]["params"]
+        assert params["markets"] == "KRW-BTC"
+
+    @pytest.mark.asyncio
+    async def test_uses_get_method(self, executor: UpbitExecutor):
+        """GET 메서드로 요청한다."""
+        with patch.object(executor, "_request", new_callable=AsyncMock) as mock_req:
+            mock_req.return_value = []
+
+            await executor.get_tickers(["KRW-BTC"])
+
+        assert mock_req.call_args[0][0] == "GET"
+
+    @pytest.mark.asyncio
+    async def test_calls_ticker_endpoint(self, executor: UpbitExecutor):
+        """/ticker 엔드포인트로 요청한다."""
+        with patch.object(executor, "_request", new_callable=AsyncMock) as mock_req:
+            mock_req.return_value = []
+
+            await executor.get_tickers(["KRW-BTC"])
+
+        assert mock_req.call_args[0][1] == "/ticker"
+
+    @pytest.mark.asyncio
+    async def test_multiple_tickers(self, executor: UpbitExecutor):
+        """여러 개의 티커 응답을 모두 Ticker 객체로 변환한다."""
+        first = SAMPLE_TICKER_RESPONSE.copy()
+        first["market"] = "KRW-BTC"
+        first["trade_price"] = 50500000
+
+        second = SAMPLE_TICKER_RESPONSE.copy()
+        second["market"] = "KRW-ETH"
+        second["trade_price"] = 4000000
+
+        with patch.object(executor, "_request", new_callable=AsyncMock) as mock_req:
+            mock_req.return_value = [first, second]
+
+            result = await executor.get_tickers(["KRW-BTC", "KRW-ETH"])
+
+        assert len(result) == 2
+        assert result[0].market == "KRW-BTC"
+        assert result[0].trade_price == Decimal("50500000")
+        assert result[1].market == "KRW-ETH"
+        assert result[1].trade_price == Decimal("4000000")
+
+    @pytest.mark.asyncio
+    async def test_converts_change_to_enum(self, executor: UpbitExecutor):
+        """change 필드가 PriceChangeState enum으로 변환된다."""
+        with patch.object(executor, "_request", new_callable=AsyncMock) as mock_req:
+            mock_req.return_value = [SAMPLE_TICKER_RESPONSE.copy()]
+
+            result = await executor.get_tickers(["KRW-BTC"])
+
+        assert result[0].change == PriceChangeState.RISE
+
+
+# ============= get_ticker =============
+
+
+class TestGetTicker:
+    @pytest.mark.asyncio
+    async def test_returns_single_ticker(self, executor: UpbitExecutor):
+        """단일 Ticker 객체를 반환한다."""
+        with patch.object(executor, "_request", new_callable=AsyncMock) as mock_req:
+            mock_req.return_value = [SAMPLE_TICKER_RESPONSE.copy()]
+
+            result = await executor.get_ticker("KRW-BTC")
+
+        assert result.market == "KRW-BTC"
+        assert result.trade_price == Decimal("50500000")
+
+    @pytest.mark.asyncio
+    async def test_delegates_to_get_tickers(self, executor: UpbitExecutor):
+        """get_tickers를 호출하여 결과를 가져온다."""
+        with patch.object(executor, "get_tickers", new_callable=AsyncMock) as mock_get_tickers:
+            mock_ticker = MagicMock()
+            mock_get_tickers.return_value = [mock_ticker]
+
+            result = await executor.get_ticker("KRW-ETH")
+
+        mock_get_tickers.assert_awaited_once_with(markets=["KRW-ETH"])
+        assert result is mock_ticker
+
+    @pytest.mark.asyncio
+    async def test_returns_first_element(self, executor: UpbitExecutor):
+        """get_tickers 결과의 첫 번째 요소를 반환한다."""
+        with patch.object(executor, "get_tickers", new_callable=AsyncMock) as mock_get_tickers:
+            first = MagicMock()
+            second = MagicMock()
+            mock_get_tickers.return_value = [first, second]
+
+            result = await executor.get_ticker("KRW-BTC")
+
+        assert result is first

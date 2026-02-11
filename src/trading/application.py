@@ -4,7 +4,10 @@ from signal import SIGINT, SIGTERM, Signals, signal
 from types import FrameType
 
 from src.config import ConfigManager
+from src.database import DataStorage
+from src.database.cache import RedisCache
 from src.trading.core import TradingEngine
+from src.trading.exchanges.upbit import UpbitExecutor
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +19,9 @@ class TradingApplication:
         self.logger = logger
 
         # Components (initialized in setup())
+        self._storage: DataStorage | None = None
+        self._cache: RedisCache | None = None
+        self._exchange: UpbitExecutor | None = None
         self._engine: TradingEngine | None = None
 
         # Runtime state
@@ -32,7 +38,41 @@ class TradingApplication:
     async def setup(self) -> bool:
         self.logger.info("Setting up trading application components...")
         try:
-            # 1. Initialize Trading Engine
+            # 1. Initialize Storage (TimescaleDB with asyncpg)
+            self._storage = DataStorage(
+                host=self.config.get("database.host"),
+                port=int(self.config.get("database.port")),
+                database=self.config.get("database.database"),
+                user=self.config.get("database.user"),
+                password=self.config.get("database.password"),
+            )
+            await self._storage.connect()
+            self.logger.info("✅ TimescaleDB storage initialized (asyncpg)")
+
+            # Health check
+            if not await self._storage.health_check():
+                raise RuntimeError("Database health check failed")
+
+            # 2. Initialize Cache (Redis)
+            self._cache = RedisCache(
+                host=self.config.get("redis.host"),
+                port=int(self.config.get("redis.port")),
+                password=self.config.get("redis.password"),
+                db=int(self.config.get("redis.database")),
+            )
+            await self._cache.connect()
+            self.logger.info("✅ Redis cache initialized")
+
+            # 3. Initialize Exchange Adapter
+            self._exchange = UpbitExecutor(
+                api_key=self.config.get("upbit.api_key"),
+                api_secret=self.config.get("upbit.api_secret"),
+                test=(self.mode == "development"),
+            )
+            await self._exchange.connect()
+            self.logger.info(f"✅ Exchange adapter initialized (mode={self.mode.value})")
+
+            # 4. Initialize Trading Engine
             self._engine = TradingEngine(
                 mode=self.mode,
                 markets=self.config.get("trading.markets"),
@@ -86,12 +126,21 @@ class TradingApplication:
 
     async def shutdown(self):
         """Graceful shutdown"""
+        if not self._running:
+            return
         self.logger.info("Initiating graceful shutdown...")
+        self._running = False
+
         try:
-            if self.engine:
+            if self._storage:
+                await self._storage.disconnect()
+            if self._cache:
+                await self._cache.disconnect()
+            if self._exchange:
+                await self._exchange.disconnect()
+            if self._engine:
                 # TODO: engine shutdown or disconnect
                 pass
-
         except Exception as e:
             self.logger.error(f"Error during shutdown: {e}")
 

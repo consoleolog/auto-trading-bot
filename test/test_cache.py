@@ -596,3 +596,70 @@ class TestRedisCache:
         assert result is False
         assert "Cache set error for key test_key" in caplog.text
         assert "Redis connection error" in caplog.text
+
+    # ============= delete =============
+
+    @pytest.mark.asyncio
+    async def test_delete_single_key(self, cache):
+        """단일 키를 삭제한다."""
+        mock_client = AsyncMock()
+        mock_client.delete = AsyncMock()
+        cache.redis_client = mock_client
+
+        result = await cache.delete("test_key")
+
+        mock_client.delete.assert_awaited_once_with("test_key")
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_delete_multiple_keys(self, cache):
+        """여러 키를 한 번에 삭제한다."""
+        mock_client = AsyncMock()
+        mock_client.delete = AsyncMock()
+        cache.redis_client = mock_client
+
+        keys = ["key1", "key2", "key3"]
+        result = await cache.delete(keys)
+
+        mock_client.delete.assert_awaited_once_with("key1", "key2", "key3")
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_delete_empty_list(self, cache):
+        """빈 리스트로 삭제를 호출해도 성공한다."""
+        mock_client = AsyncMock()
+        mock_client.delete = AsyncMock()
+        cache.redis_client = mock_client
+
+        result = await cache.delete([])
+
+        mock_client.delete.assert_awaited_once_with()
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_delete_handles_redis_error_with_single_key(self, cache, caplog):
+        """단일 키 삭제 시 Redis 오류가 발생하면 False를 반환하고 로그를 남긴다."""
+        mock_client = AsyncMock()
+        mock_client.delete = AsyncMock(side_effect=Exception("Redis connection error"))
+        cache.redis_client = mock_client
+
+        with caplog.at_level("ERROR"):
+            result = await cache.delete("test_key")
+
+        assert result is False
+        assert "Cache delete error" in caplog.text
+        assert "Redis connection error" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_delete_handles_redis_error_with_multiple_keys(self, cache, caplog):
+        """여러 키 삭제 시 Redis 오류가 발생하면 False를 반환하고 로그를 남긴다."""
+        mock_client = AsyncMock()
+        mock_client.delete = AsyncMock(side_effect=Exception("Redis connection error"))
+        cache.redis_client = mock_client
+
+        with caplog.at_level("ERROR"):
+            result = await cache.delete(["key1", "key2"])
+
+        assert result is False
+        assert "Cache delete error" in caplog.text
+        assert "Redis connection error" in caplog.text

@@ -177,3 +177,23 @@ class RedisCache:
         except Exception as e:
             logger.error(f"Cache set error for key {key}: {e}")
             return False
+
+    async def delete(self, key: str | list[str]) -> bool:
+        """
+        캐시에서 키를 삭제합니다.
+
+        Args:
+            key: 삭제할 캐시 키 (문자열) 또는 키 목록 (리스트)
+
+        Returns:
+            성공 시 True, 실패 시 False
+        """
+        try:
+            if isinstance(key, str):
+                await self.redis_client.delete(key)
+            else:
+                await self.redis_client.delete(*key)
+            return True
+        except Exception as e:
+            logger.error(f"Cache delete error: {e}")
+            return False

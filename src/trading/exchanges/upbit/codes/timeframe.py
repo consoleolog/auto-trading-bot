@@ -32,9 +32,9 @@ class Timeframe(Enum):
     MINUTE_10 = f"minutes/{Unit.MINUTE_10.value}"
     MINUTE_15 = f"minutes/{Unit.MINUTE_15.value}"
 
-    HALF_HOUR = f"hours/{Unit.HALF_HOUR.value}"
-    HOUR = f"hours/{Unit.HOUR.value}"
-    HOUR_4 = f"hours/{Unit.HOUR_4.value}"
+    HALF_HOUR = f"minutes/{Unit.HALF_HOUR.value}"
+    HOUR = f"minutes/{Unit.HOUR.value}"
+    HOUR_4 = f"minutes/{Unit.HOUR_4.value}"
 
     DAY = "days"
     WEEK = "weeks"

@@ -1539,3 +1539,149 @@ class TestRedisCache:
         assert result == []
         assert "Cache lrange error" in caplog.text
         assert "Redis connection error" in caplog.text
+
+    # ============= zadd =============
+
+    @pytest.mark.asyncio
+    async def test_zadd_adds_single_member(self, cache):
+        """정렬된 집합에 단일 멤버를 추가한다."""
+        mock_client = AsyncMock()
+        mock_client.zadd = AsyncMock(return_value=1)
+        cache.redis_client = mock_client
+
+        mapping = {"member1": 100.0}
+
+        result = await cache.zadd("sorted_set_key", mapping)
+
+        mock_client.zadd.assert_awaited_once_with("sorted_set_key", mapping)
+        assert result == 1
+
+    @pytest.mark.asyncio
+    async def test_zadd_adds_multiple_members(self, cache):
+        """정렬된 집합에 여러 멤버를 추가한다."""
+        mock_client = AsyncMock()
+        mock_client.zadd = AsyncMock(return_value=3)
+        cache.redis_client = mock_client
+
+        mapping = {"member1": 100.0, "member2": 200.0, "member3": 300.0}
+
+        result = await cache.zadd("sorted_set_key", mapping)
+
+        mock_client.zadd.assert_awaited_once_with("sorted_set_key", mapping)
+        assert result == 3
+
+    @pytest.mark.asyncio
+    async def test_zadd_updates_existing_member_score(self, cache):
+        """기존 멤버의 점수를 업데이트할 때 0을 반환한다."""
+        mock_client = AsyncMock()
+        mock_client.zadd = AsyncMock(return_value=0)  # 기존 멤버 업데이트 시
+        cache.redis_client = mock_client
+
+        mapping = {"existing_member": 150.0}
+
+        result = await cache.zadd("sorted_set_key", mapping)
+
+        assert result == 0
+
+    @pytest.mark.asyncio
+    async def test_zadd_handles_empty_mapping(self, cache):
+        """빈 딕셔너리로 호출 시 0을 반환한다."""
+        mock_client = AsyncMock()
+        mock_client.zadd = AsyncMock(return_value=0)
+        cache.redis_client = mock_client
+
+        result = await cache.zadd("sorted_set_key", {})
+
+        mock_client.zadd.assert_awaited_once_with("sorted_set_key", {})
+        assert result == 0
+
+    @pytest.mark.asyncio
+    async def test_zadd_handles_redis_error(self, cache, caplog):
+        """Redis 오류 발생 시 0을 반환하고 로그를 남긴다."""
+        mock_client = AsyncMock()
+        mock_client.zadd = AsyncMock(side_effect=Exception("Redis connection error"))
+        cache.redis_client = mock_client
+
+        with caplog.at_level("ERROR"):
+            result = await cache.zadd("sorted_set_key", {"member": 100.0})
+
+        assert result == 0
+        assert "Cache zadd error" in caplog.text
+        assert "Redis connection error" in caplog.text
+
+    # ============= zrange =============
+
+    @pytest.mark.asyncio
+    async def test_zrange_returns_members_without_scores(self, cache):
+        """점수 없이 멤버만 반환한다."""
+        mock_client = AsyncMock()
+        mock_client.zrange = AsyncMock(return_value=[b"member1", b"member2", b"member3"])
+        cache.redis_client = mock_client
+
+        result = await cache.zrange("sorted_set_key", 0, -1, withscores=False)
+
+        mock_client.zrange.assert_awaited_once_with("sorted_set_key", 0, -1, withscores=False)
+        assert result == [b"member1", b"member2", b"member3"]
+
+    @pytest.mark.asyncio
+    async def test_zrange_returns_members_with_scores(self, cache):
+        """점수와 함께 멤버를 반환한다."""
+        mock_client = AsyncMock()
+        mock_client.zrange = AsyncMock(return_value=[(b"member1", 100.0), (b"member2", 200.0), (b"member3", 300.0)])
+        cache.redis_client = mock_client
+
+        result = await cache.zrange("sorted_set_key", 0, -1, withscores=True)
+
+        mock_client.zrange.assert_awaited_once_with("sorted_set_key", 0, -1, withscores=True)
+        assert result == [(b"member1", 100.0), (b"member2", 200.0), (b"member3", 300.0)]
+
+    @pytest.mark.asyncio
+    async def test_zrange_with_specific_range(self, cache):
+        """특정 범위의 멤버만 가져온다."""
+        mock_client = AsyncMock()
+        mock_client.zrange = AsyncMock(return_value=[b"member2", b"member3"])
+        cache.redis_client = mock_client
+
+        result = await cache.zrange("sorted_set_key", 1, 2)
+
+        mock_client.zrange.assert_awaited_once_with("sorted_set_key", 1, 2, withscores=False)
+        assert result == [b"member2", b"member3"]
+
+    @pytest.mark.asyncio
+    async def test_zrange_returns_empty_list_when_no_members(self, cache):
+        """멤버가 없을 때 빈 리스트를 반환한다."""
+        mock_client = AsyncMock()
+        mock_client.zrange = AsyncMock(return_value=[])
+        cache.redis_client = mock_client
+
+        result = await cache.zrange("sorted_set_key", 0, -1)
+
+        mock_client.zrange.assert_awaited_once_with("sorted_set_key", 0, -1, withscores=False)
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_zrange_default_withscores_is_false(self, cache):
+        """withscores의 기본값은 False이다."""
+        mock_client = AsyncMock()
+        mock_client.zrange = AsyncMock(return_value=[b"member1"])
+        cache.redis_client = mock_client
+
+        result = await cache.zrange("sorted_set_key", 0, 0)
+
+        # withscores=False가 기본값으로 전달되어야 함
+        mock_client.zrange.assert_awaited_once_with("sorted_set_key", 0, 0, withscores=False)
+        assert result == [b"member1"]
+
+    @pytest.mark.asyncio
+    async def test_zrange_handles_redis_error(self, cache, caplog):
+        """Redis 오류 발생 시 빈 리스트를 반환하고 로그를 남긴다."""
+        mock_client = AsyncMock()
+        mock_client.zrange = AsyncMock(side_effect=Exception("Redis connection error"))
+        cache.redis_client = mock_client
+
+        with caplog.at_level("ERROR"):
+            result = await cache.zrange("sorted_set_key", 0, -1)
+
+        assert result == []
+        assert "Cache zrange error" in caplog.text
+        assert "Redis connection error" in caplog.text

@@ -437,3 +437,40 @@ class RedisCache:
         except Exception as e:
             logger.error(f"Cache lrange error: {e}")
             return []
+
+    # 랭킹을 위한 정렬된 집합 연산
+    async def zadd(self, key: str, mapping: dict[str, float]) -> int:
+        """
+        정렬된 집합(Sorted Set)에 점수와 함께 멤버를 추가합니다.
+
+        Args:
+            key: 정렬된 집합 키
+            mapping: {멤버: 점수} 형태의 딕셔너리
+
+        Returns:
+            추가된 새 멤버의 개수
+        """
+        try:
+            return await self.redis_client.zadd(key, mapping)
+        except Exception as e:
+            logger.error(f"Cache zadd error: {e}")
+            return 0
+
+    async def zrange(self, key: str, start: int, stop: int, withscores: bool = False) -> list[Any]:
+        """
+        정렬된 집합에서 범위의 멤버를 가져옵니다.
+
+        Args:
+            key: 정렬된 집합 키
+            start: 시작 인덱스 (0부터 시작)
+            stop: 종료 인덱스 (-1은 마지막 요소)
+            withscores: True이면 점수도 함께 반환
+
+        Returns:
+            지정된 범위의 멤버 리스트 (withscores=True면 (멤버, 점수) 튜플 리스트)
+        """
+        try:
+            return await self.redis_client.zrange(key, start, stop, withscores=withscores)
+        except Exception as e:
+            logger.error(f"Cache zrange error: {e}")
+            return []

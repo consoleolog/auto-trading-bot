@@ -660,3 +660,32 @@ class RedisCache:
         except Exception as e:
             logger.error(f"Failed to release lock: {e}")
             return False
+
+    async def clear(self, pattern: str = "*") -> bool:
+        """
+        모든 캐시 항목 또는 특정 패턴과 일치하는 항목을 삭제합니다.
+
+        Args:
+            pattern: 일치시킬 Redis 키 패턴 (기본값 "*"는 모든 키 삭제)
+
+        Returns:
+            성공 시 True, 실패 시 False
+        """
+        try:
+            # 패턴과 일치하는 모든 키 가져오기
+            keys = []
+            async for key in self.redis_client.scan_iter(match=pattern):
+                keys.append(key)
+
+            if keys:
+                # 일치하는 모든 키 삭제
+                deleted_count = await self.redis_client.delete(*keys)
+                logger.info(f"Cleared {deleted_count} keys from cache with pattern: {pattern}")
+                return True
+            else:
+                logger.info(f"No keys found matching pattern: {pattern}")
+                return True
+
+        except Exception as e:
+            logger.error(f"Cache clear error: {e}")
+            return False

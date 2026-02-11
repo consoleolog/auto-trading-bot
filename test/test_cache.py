@@ -2592,3 +2592,189 @@ class TestRedisCache:
 
         mock_lock.acquire.assert_awaited_once()
         mock_lock.release.assert_awaited_once()
+
+    # ============= clear =============
+
+    @pytest.mark.asyncio
+    async def test_clear_deletes_all_keys_with_default_pattern(self, cache, caplog):
+        """기본 패턴(*)으로 모든 키를 삭제한다."""
+        mock_client = AsyncMock()
+
+        # scan_iter가 비동기 이터레이터를 반환하도록 모킹
+        async def mock_scan_iter(match):
+            for key in [b"key1", b"key2", b"key3"]:
+                yield key
+
+        mock_client.scan_iter = mock_scan_iter
+        mock_client.delete = AsyncMock(return_value=3)
+        cache.redis_client = mock_client
+
+        with caplog.at_level("INFO"):
+            result = await cache.clear()
+
+        mock_client.delete.assert_awaited_once_with(b"key1", b"key2", b"key3")
+        assert result is True
+        assert "Cleared 3 keys from cache with pattern: *" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_clear_deletes_keys_matching_specific_pattern(self, cache, caplog):
+        """특정 패턴과 일치하는 키만 삭제한다."""
+        mock_client = AsyncMock()
+
+        async def mock_scan_iter(match):
+            assert match == "user:*"
+            for key in [b"user:1", b"user:2"]:
+                yield key
+
+        mock_client.scan_iter = mock_scan_iter
+        mock_client.delete = AsyncMock(return_value=2)
+        cache.redis_client = mock_client
+
+        with caplog.at_level("INFO"):
+            result = await cache.clear("user:*")
+
+        mock_client.delete.assert_awaited_once_with(b"user:1", b"user:2")
+        assert result is True
+        assert "Cleared 2 keys from cache with pattern: user:*" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_clear_returns_true_when_no_keys_found(self, cache, caplog):
+        """일치하는 키가 없을 때도 True를 반환한다."""
+        mock_client = AsyncMock()
+
+        async def mock_scan_iter(match):
+            return
+            yield  # 제너레이터로 만들기 위해 필요
+
+        mock_client.scan_iter = mock_scan_iter
+        mock_client.delete = AsyncMock()
+        cache.redis_client = mock_client
+
+        with caplog.at_level("INFO"):
+            result = await cache.clear("nonexistent:*")
+
+        # delete가 호출되지 않아야 함
+        mock_client.delete.assert_not_awaited()
+        assert result is True
+        assert "No keys found matching pattern: nonexistent:*" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_clear_handles_single_key(self, cache, caplog):
+        """단일 키도 올바르게 삭제한다."""
+        mock_client = AsyncMock()
+
+        async def mock_scan_iter(match):
+            yield b"single_key"
+
+        mock_client.scan_iter = mock_scan_iter
+        mock_client.delete = AsyncMock(return_value=1)
+        cache.redis_client = mock_client
+
+        with caplog.at_level("INFO"):
+            result = await cache.clear("single_key")
+
+        mock_client.delete.assert_awaited_once_with(b"single_key")
+        assert result is True
+        assert "Cleared 1 keys from cache with pattern: single_key" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_clear_handles_many_keys(self, cache, caplog):
+        """많은 수의 키도 올바르게 삭제한다."""
+        mock_client = AsyncMock()
+
+        async def mock_scan_iter(match):
+            for i in range(100):
+                yield f"key{i}".encode()
+
+        mock_client.scan_iter = mock_scan_iter
+        mock_client.delete = AsyncMock(return_value=100)
+        cache.redis_client = mock_client
+
+        with caplog.at_level("INFO"):
+            result = await cache.clear()
+
+        assert mock_client.delete.await_count == 1
+        assert result is True
+        assert "Cleared 100 keys from cache with pattern: *" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_clear_handles_redis_error_during_scan(self, cache, caplog):
+        """scan_iter 중 Redis 오류 발생 시 False를 반환하고 로그를 남긴다."""
+        mock_client = AsyncMock()
+
+        async def mock_scan_iter(match):
+            raise Exception("Redis scan error")
+            yield  # 제너레이터로 만들기 위해 필요
+
+        mock_client.scan_iter = mock_scan_iter
+        cache.redis_client = mock_client
+
+        with caplog.at_level("ERROR"):
+            result = await cache.clear()
+
+        assert result is False
+        assert "Cache clear error" in caplog.text
+        assert "Redis scan error" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_clear_handles_redis_error_during_delete(self, cache, caplog):
+        """delete 중 Redis 오류 발생 시 False를 반환하고 로그를 남긴다."""
+        mock_client = AsyncMock()
+
+        async def mock_scan_iter(match):
+            yield b"key1"
+            yield b"key2"
+
+        mock_client.scan_iter = mock_scan_iter
+        mock_client.delete = AsyncMock(side_effect=Exception("Redis delete error"))
+        cache.redis_client = mock_client
+
+        with caplog.at_level("ERROR"):
+            result = await cache.clear()
+
+        assert result is False
+        assert "Cache clear error" in caplog.text
+        assert "Redis delete error" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_clear_with_complex_pattern(self, cache, caplog):
+        """복잡한 패턴으로도 올바르게 작동한다."""
+        mock_client = AsyncMock()
+
+        async def mock_scan_iter(match):
+            assert match == "cache:data:*:temp"
+            yield b"cache:data:123:temp"
+            yield b"cache:data:456:temp"
+
+        mock_client.scan_iter = mock_scan_iter
+        mock_client.delete = AsyncMock(return_value=2)
+        cache.redis_client = mock_client
+
+        with caplog.at_level("INFO"):
+            result = await cache.clear("cache:data:*:temp")
+
+        mock_client.delete.assert_awaited_once_with(b"cache:data:123:temp", b"cache:data:456:temp")
+        assert result is True
+        assert "Cleared 2 keys from cache with pattern: cache:data:*:temp" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_clear_multiple_times(self, cache, caplog):
+        """여러 번 호출해도 올바르게 작동한다."""
+        mock_client = AsyncMock()
+
+        async def mock_scan_iter(match):
+            yield b"key1"
+
+        mock_client.scan_iter = mock_scan_iter
+        mock_client.delete = AsyncMock(return_value=1)
+        cache.redis_client = mock_client
+
+        with caplog.at_level("INFO"):
+            result1 = await cache.clear()
+            result2 = await cache.clear()
+            result3 = await cache.clear()
+
+        assert result1 is True
+        assert result2 is True
+        assert result3 is True
+        assert mock_client.delete.await_count == 3

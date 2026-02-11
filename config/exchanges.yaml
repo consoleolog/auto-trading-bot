@@ -1,0 +1,25 @@
+# Exchange configurations
+exchange:
+  executor_name: upbit
+
+  upbit:
+    enabled: true
+    mode: test
+
+    api_key: ${UPBIT_API_KEY}
+    api_secret: ${UPBIT_API_SECRET}
+
+    # Order execution settings
+    execution:
+      # Order type preference
+      default_order_type: limit
+
+      # Slippage tolerance (%)
+      max_slippage_percent: 0.5
+
+      # Retry settings
+      max_retries: 3
+      retry_delay_seconds: 1
+
+      # Timeout (seconds)
+      order_timeout_seconds: 30

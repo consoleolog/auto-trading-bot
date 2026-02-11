@@ -1,0 +1,19 @@
+# Auto Trading Bot Main Configuration
+trading_bot:
+  name: auto-trading-bot
+
+  # Operating Mode
+  mode: development
+
+  # Trading session
+  trading_hours:
+    enabled: false  # Trade 24/7 for crypto
+    # start: "09:00"
+    # end: "17:00"
+    # timezone: "UTC"
+
+  # Health check interval (seconds)
+  health_check_interval: 60
+
+  # Data refresh interval (seconds)
+  data_refresh_interval: 60

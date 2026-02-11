@@ -197,3 +197,19 @@ class RedisCache:
         except Exception as e:
             logger.error(f"Cache delete error: {e}")
             return False
+
+    async def exists(self, key: str) -> bool:
+        """
+        캐시에 키가 존재하는지 확인합니다.
+
+        Args:
+            key: 확인할 캐시 키
+
+        Returns:
+            키가 존재하면 True, 존재하지 않거나 오류 발생 시 False
+        """
+        try:
+            return bool(await self.redis_client.exists(key))
+        except Exception as e:
+            logger.error(f"Cache exists error for key {key}: {e}")
+            return False

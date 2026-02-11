@@ -663,3 +663,54 @@ class TestRedisCache:
         assert result is False
         assert "Cache delete error" in caplog.text
         assert "Redis connection error" in caplog.text
+
+    # ============= exists =============
+
+    @pytest.mark.asyncio
+    async def test_exists_returns_true_when_key_exists(self, cache):
+        """키가 존재할 때 True를 반환한다."""
+        mock_client = AsyncMock()
+        mock_client.exists = AsyncMock(return_value=1)  # Redis exists는 존재하는 키 개수를 반환
+        cache.redis_client = mock_client
+
+        result = await cache.exists("test_key")
+
+        mock_client.exists.assert_awaited_once_with("test_key")
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_exists_returns_false_when_key_not_exists(self, cache):
+        """키가 존재하지 않을 때 False를 반환한다."""
+        mock_client = AsyncMock()
+        mock_client.exists = AsyncMock(return_value=0)
+        cache.redis_client = mock_client
+
+        result = await cache.exists("nonexistent_key")
+
+        mock_client.exists.assert_awaited_once_with("nonexistent_key")
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_exists_handles_redis_error(self, cache, caplog):
+        """Redis 오류 발생 시 False를 반환하고 로그를 남긴다."""
+        mock_client = AsyncMock()
+        mock_client.exists = AsyncMock(side_effect=Exception("Redis connection error"))
+        cache.redis_client = mock_client
+
+        with caplog.at_level("ERROR"):
+            result = await cache.exists("test_key")
+
+        assert result is False
+        assert "Cache exists error for key test_key" in caplog.text
+        assert "Redis connection error" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_exists_converts_non_zero_to_true(self, cache):
+        """Redis exists가 0이 아닌 값을 반환하면 True로 변환한다."""
+        mock_client = AsyncMock()
+        mock_client.exists = AsyncMock(return_value=5)  # 여러 키가 존재할 경우
+        cache.redis_client = mock_client
+
+        result = await cache.exists("test_key")
+
+        assert result is True

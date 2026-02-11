@@ -1,0 +1,209 @@
+from unittest.mock import AsyncMock, patch
+
+import pytest
+
+from src.database.cache import RedisCache
+
+
+class TestRedisCache:
+    @pytest.fixture
+    def redis_config(self):
+        """Redis 연결 설정을 반환하는 fixture"""
+        return {
+            "host": "localhost",
+            "port": 6379,
+            "password": "test_password",
+            "db": 0,
+        }
+
+    @pytest.fixture
+    def redis_config_no_password(self):
+        """비밀번호가 없는 Redis 연결 설정을 반환하는 fixture"""
+        return {
+            "host": "localhost",
+            "port": 6379,
+            "password": "",
+            "db": 0,
+        }
+
+    @pytest.fixture
+    def cache(self, redis_config):
+        """RedisCache 인스턴스를 반환하는 fixture"""
+        return RedisCache(**redis_config)
+
+    # ============= __init__ =============
+
+    def test_init_sets_config_properties(self, redis_config):
+        """초기화 시 설정 값들이 올바르게 저장된다."""
+        cache = RedisCache(**redis_config)
+
+        assert cache.host == redis_config["host"]
+        assert cache.port == redis_config["port"]
+        assert cache.password == redis_config["password"]
+        assert cache.db == redis_config["db"]
+        assert cache.redis_client is None
+        assert cache.is_connected is False
+
+    # ============= connect =============
+
+    @pytest.mark.asyncio
+    async def test_connect_creates_redis_client_with_password(self, cache, redis_config, caplog):
+        """비밀번호가 있을 때 Redis 클라이언트를 생성하고 연결한다."""
+        with (
+            patch("src.database.cache.redis.from_url", new_callable=AsyncMock) as mock_from_url,
+            caplog.at_level("INFO"),
+        ):
+            mock_client = AsyncMock()
+            mock_client.ping = AsyncMock()
+            mock_client.config_set = AsyncMock()
+            mock_from_url.return_value = mock_client
+
+            await cache.connect()
+
+            # Redis URL이 비밀번호 포함하여 올바르게 생성되었는지 확인
+            expected_url = f"redis://:{redis_config['password']}@{redis_config['host']}:{redis_config['port']}/{redis_config['db']}"
+            mock_from_url.assert_awaited_once()
+            call_args = mock_from_url.call_args
+            assert call_args[0][0] == expected_url
+            assert call_args[1]["encoding"] == "utf-8"
+            assert call_args[1]["decode_responses"] is False
+            assert call_args[1]["socket_keepalive"] is True
+            assert call_args[1]["max_connections"] == 50
+            assert call_args[1]["health_check_interval"] == 30
+
+            # ping 호출 확인
+            mock_client.ping.assert_awaited_once()
+
+            # keyspace 알림 설정 확인
+            mock_client.config_set.assert_awaited_once_with("notify-keyspace-events", "Ex")
+
+            # 연결 상태 확인
+            assert cache.is_connected is True
+            assert cache.redis_client == mock_client
+
+            # 로그 확인
+            assert "Successfully connected to" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_connect_creates_redis_client_without_password(self, redis_config_no_password, caplog):
+        """비밀번호가 없을 때 Redis 클라이언트를 생성하고 연결한다."""
+        cache = RedisCache(**redis_config_no_password)
+
+        with (
+            patch("src.database.cache.redis.from_url", new_callable=AsyncMock) as mock_from_url,
+            caplog.at_level("INFO"),
+        ):
+            mock_client = AsyncMock()
+            mock_client.ping = AsyncMock()
+            mock_client.config_set = AsyncMock()
+            mock_from_url.return_value = mock_client
+
+            await cache.connect()
+
+            # Redis URL이 비밀번호 없이 올바르게 생성되었는지 확인
+            expected_url = f"redis://{redis_config_no_password['host']}:{redis_config_no_password['port']}/{redis_config_no_password['db']}"
+            call_args = mock_from_url.call_args
+            assert call_args[0][0] == expected_url
+
+            assert cache.is_connected is True
+
+    @pytest.mark.asyncio
+    async def test_connect_handles_connection_failure(self, cache, caplog):
+        """Redis 연결 실패 시 예외를 발생시키고 로그를 남긴다."""
+        with (
+            patch("src.database.cache.redis.from_url", new_callable=AsyncMock) as mock_from_url,
+            caplog.at_level("ERROR"),
+        ):
+            mock_from_url.side_effect = Exception("Connection failed")
+
+            with pytest.raises(Exception, match="Connection failed"):
+                await cache.connect()
+
+            assert "Failed to connect to Redis" in caplog.text
+            assert cache.is_connected is False
+
+    @pytest.mark.asyncio
+    async def test_connect_handles_ping_failure(self, cache, caplog):
+        """Redis ping 실패 시 예외를 발생시킨다."""
+        with (
+            patch("src.database.cache.redis.from_url", new_callable=AsyncMock) as mock_from_url,
+            caplog.at_level("ERROR"),
+        ):
+            mock_client = AsyncMock()
+            mock_client.ping = AsyncMock(side_effect=Exception("Ping failed"))
+            mock_from_url.return_value = mock_client
+
+            with pytest.raises(Exception, match="Ping failed"):
+                await cache.connect()
+
+            assert "Failed to connect to Redis" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_setup_keyspace_notifications_handles_failure(self, cache, caplog):
+        """keyspace 알림 설정 실패 시 경고 로그를 남기지만 연결은 성공한다."""
+        with (
+            patch("src.database.cache.redis.from_url", new_callable=AsyncMock) as mock_from_url,
+            caplog.at_level("WARNING"),
+        ):
+            mock_client = AsyncMock()
+            mock_client.ping = AsyncMock()
+            mock_client.config_set = AsyncMock(side_effect=Exception("Config failed"))
+            mock_from_url.return_value = mock_client
+
+            await cache.connect()
+
+            assert "Could not set keyspace notifications" in caplog.text
+            # keyspace 알림 설정 실패해도 연결은 성공
+            assert cache.is_connected is True
+
+    # ============= disconnect =============
+
+    @pytest.mark.asyncio
+    async def test_disconnect_closes_redis_client(self, cache, caplog):
+        """Redis 클라이언트를 닫고 연결 상태를 False로 설정한다."""
+        mock_client = AsyncMock()
+        cache.redis_client = mock_client
+        cache.is_connected = True
+
+        with caplog.at_level("INFO"):
+            await cache.disconnect()
+
+        mock_client.close.assert_awaited_once()
+        assert cache.is_connected is False
+        assert "Disconnected from Redis cache" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_disconnect_when_no_client(self, cache):
+        """Redis 클라이언트가 없을 때 disconnect를 호출해도 에러가 발생하지 않는다."""
+        cache.redis_client = None
+
+        # 예외가 발생하지 않아야 함
+        await cache.disconnect()
+
+        assert cache.is_connected is False
+
+    # ============= _setup_keyspace_notifications =============
+
+    @pytest.mark.asyncio
+    async def test_setup_keyspace_notifications_success(self, cache):
+        """keyspace 알림을 성공적으로 설정한다."""
+        mock_client = AsyncMock()
+        mock_client.config_set = AsyncMock()
+        cache.redis_client = mock_client
+
+        await cache._setup_keyspace_notifications()
+
+        mock_client.config_set.assert_awaited_once_with("notify-keyspace-events", "Ex")
+
+    @pytest.mark.asyncio
+    async def test_setup_keyspace_notifications_failure(self, cache, caplog):
+        """keyspace 알림 설정 실패 시 경고 로그를 남긴다."""
+        mock_client = AsyncMock()
+        mock_client.config_set = AsyncMock(side_effect=Exception("Permission denied"))
+        cache.redis_client = mock_client
+
+        with caplog.at_level("WARNING"):
+            await cache._setup_keyspace_notifications()
+
+        assert "Could not set keyspace notifications" in caplog.text
+        assert "Permission denied" in caplog.text

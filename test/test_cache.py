@@ -1,4 +1,4 @@
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -936,9 +936,12 @@ class TestRedisCache:
         mock_pipe = AsyncMock()
         mock_pipe.set = AsyncMock()
         mock_pipe.execute = AsyncMock()
-        mock_client.pipeline = AsyncMock(return_value=mock_pipe)
+
+        # pipeline()이 컨텍스트 매니저를 반환하도록 설정
         mock_pipe.__aenter__ = AsyncMock(return_value=mock_pipe)
         mock_pipe.__aexit__ = AsyncMock(return_value=None)
+        mock_client.pipeline = MagicMock(return_value=mock_pipe)
+
         cache.redis_client = mock_client
 
         test_data = {
@@ -961,9 +964,11 @@ class TestRedisCache:
         mock_pipe = AsyncMock()
         mock_pipe.setex = AsyncMock()
         mock_pipe.execute = AsyncMock()
-        mock_client.pipeline = AsyncMock(return_value=mock_pipe)
+
         mock_pipe.__aenter__ = AsyncMock(return_value=mock_pipe)
         mock_pipe.__aexit__ = AsyncMock(return_value=None)
+        mock_client.pipeline = MagicMock(return_value=mock_pipe)
+
         cache.redis_client = mock_client
 
         test_data = {
@@ -984,9 +989,11 @@ class TestRedisCache:
         mock_client = AsyncMock()
         mock_pipe = AsyncMock()
         mock_pipe.execute = AsyncMock()
-        mock_client.pipeline = AsyncMock(return_value=mock_pipe)
+
         mock_pipe.__aenter__ = AsyncMock(return_value=mock_pipe)
         mock_pipe.__aexit__ = AsyncMock(return_value=None)
+        mock_client.pipeline = MagicMock(return_value=mock_pipe)
+
         cache.redis_client = mock_client
 
         result = await cache.set_many({})
@@ -1003,9 +1010,11 @@ class TestRedisCache:
         mock_pipe = AsyncMock()
         mock_pipe.set = AsyncMock()
         mock_pipe.execute = AsyncMock()
-        mock_client.pipeline = AsyncMock(return_value=mock_pipe)
+
         mock_pipe.__aenter__ = AsyncMock(return_value=mock_pipe)
         mock_pipe.__aexit__ = AsyncMock(return_value=None)
+        mock_client.pipeline = MagicMock(return_value=mock_pipe)
+
         cache.redis_client = mock_client
 
         test_data = {"key1": {"name": "test", "value": 123}}
@@ -1027,9 +1036,11 @@ class TestRedisCache:
         mock_pipe = AsyncMock()
         mock_pipe.set = AsyncMock()
         mock_pipe.execute = AsyncMock()
-        mock_client.pipeline = AsyncMock(return_value=mock_pipe)
+
         mock_pipe.__aenter__ = AsyncMock(return_value=mock_pipe)
         mock_pipe.__aexit__ = AsyncMock(return_value=None)
+        mock_client.pipeline = MagicMock(return_value=mock_pipe)
+
         cache.redis_client = mock_client
 
         test_data = {"key1": [1, 2, 3]}
@@ -1048,9 +1059,11 @@ class TestRedisCache:
         mock_pipe = AsyncMock()
         mock_pipe.set = AsyncMock()
         mock_pipe.execute = AsyncMock()
-        mock_client.pipeline = AsyncMock(return_value=mock_pipe)
+
         mock_pipe.__aenter__ = AsyncMock(return_value=mock_pipe)
         mock_pipe.__aexit__ = AsyncMock(return_value=None)
+        mock_client.pipeline = MagicMock(return_value=mock_pipe)
+
         cache.redis_client = mock_client
 
         test_data = {"key1": "simple_string"}
@@ -1069,9 +1082,11 @@ class TestRedisCache:
         mock_pipe = AsyncMock()
         mock_pipe.set = AsyncMock()
         mock_pipe.execute = AsyncMock(side_effect=Exception("Redis connection error"))
-        mock_client.pipeline = AsyncMock(return_value=mock_pipe)
+
         mock_pipe.__aenter__ = AsyncMock(return_value=mock_pipe)
         mock_pipe.__aexit__ = AsyncMock(return_value=None)
+        mock_client.pipeline = MagicMock(return_value=mock_pipe)
+
         cache.redis_client = mock_client
 
         test_data = {"key1": "value1"}
@@ -1082,3 +1097,225 @@ class TestRedisCache:
         assert result is False
         assert "Cache set_many error" in caplog.text
         assert "Redis connection error" in caplog.text
+
+    # ============= hget =============
+
+    @pytest.mark.asyncio
+    async def test_hget_returns_json_value(self, cache):
+        """해시에서 JSON 값을 가져온다."""
+        import json
+
+        mock_client = AsyncMock()
+        test_value = {"name": "test", "value": 123}
+        mock_client.hget = AsyncMock(return_value=json.dumps(test_value).encode())
+        cache.redis_client = mock_client
+
+        result = await cache.hget("hash_name", "field_key")
+
+        mock_client.hget.assert_awaited_once_with("hash_name", "field_key")
+        assert result == test_value
+
+    @pytest.mark.asyncio
+    async def test_hget_returns_string_value(self, cache):
+        """해시에서 문자열 값을 가져온다."""
+        mock_client = AsyncMock()
+        mock_client.hget = AsyncMock(return_value=b"simple_value")
+        cache.redis_client = mock_client
+
+        result = await cache.hget("hash_name", "field_key")
+
+        mock_client.hget.assert_awaited_once_with("hash_name", "field_key")
+        assert result == "simple_value"
+
+    @pytest.mark.asyncio
+    async def test_hget_returns_none_when_field_not_exists(self, cache):
+        """필드가 존재하지 않을 때 None을 반환한다."""
+        mock_client = AsyncMock()
+        mock_client.hget = AsyncMock(return_value=None)
+        cache.redis_client = mock_client
+
+        result = await cache.hget("hash_name", "nonexistent_field")
+
+        mock_client.hget.assert_awaited_once_with("hash_name", "nonexistent_field")
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_hget_handles_redis_error(self, cache, caplog):
+        """Redis 오류 발생 시 None을 반환하고 로그를 남긴다."""
+        mock_client = AsyncMock()
+        mock_client.hget = AsyncMock(side_effect=Exception("Redis connection error"))
+        cache.redis_client = mock_client
+
+        with caplog.at_level("ERROR"):
+            result = await cache.hget("hash_name", "field_key")
+
+        assert result is None
+        assert "Cache hget error" in caplog.text
+        assert "Redis connection error" in caplog.text
+
+    # ============= hset =============
+
+    @pytest.mark.asyncio
+    async def test_hset_sets_dict_value(self, cache):
+        """딕셔너리 값을 해시에 설정한다."""
+        import json
+
+        mock_client = AsyncMock()
+        mock_client.hset = AsyncMock()
+        cache.redis_client = mock_client
+
+        test_value = {"name": "test", "value": 123}
+
+        result = await cache.hset("hash_name", "field_key", test_value)
+
+        mock_client.hset.assert_awaited_once_with("hash_name", "field_key", json.dumps(test_value))
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_hset_sets_list_value(self, cache):
+        """리스트 값을 해시에 설정한다."""
+        import json
+
+        mock_client = AsyncMock()
+        mock_client.hset = AsyncMock()
+        cache.redis_client = mock_client
+
+        test_value = [1, 2, 3]
+
+        result = await cache.hset("hash_name", "field_key", test_value)
+
+        mock_client.hset.assert_awaited_once_with("hash_name", "field_key", json.dumps(test_value))
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_hset_sets_string_value(self, cache):
+        """문자열 값을 해시에 설정한다."""
+        mock_client = AsyncMock()
+        mock_client.hset = AsyncMock()
+        cache.redis_client = mock_client
+
+        test_value = "simple_string"
+
+        result = await cache.hset("hash_name", "field_key", test_value)
+
+        mock_client.hset.assert_awaited_once_with("hash_name", "field_key", test_value.encode("utf-8"))
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_hset_sets_int_value(self, cache):
+        """정수 값을 해시에 설정한다."""
+        mock_client = AsyncMock()
+        mock_client.hset = AsyncMock()
+        cache.redis_client = mock_client
+
+        test_value = 12345
+
+        result = await cache.hset("hash_name", "field_key", test_value)
+
+        mock_client.hset.assert_awaited_once_with("hash_name", "field_key", str(test_value).encode("utf-8"))
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_hset_handles_redis_error(self, cache, caplog):
+        """Redis 오류 발생 시 False를 반환하고 로그를 남긴다."""
+        mock_client = AsyncMock()
+        mock_client.hset = AsyncMock(side_effect=Exception("Redis connection error"))
+        cache.redis_client = mock_client
+
+        with caplog.at_level("ERROR"):
+            result = await cache.hset("hash_name", "field_key", "value")
+
+        assert result is False
+        assert "Cache hset error" in caplog.text
+        assert "Redis connection error" in caplog.text
+
+    # ============= hgetall =============
+
+    @pytest.mark.asyncio
+    async def test_hgetall_returns_all_fields(self, cache):
+        """해시의 모든 필드를 가져온다."""
+        import json
+
+        mock_client = AsyncMock()
+        test_data = {
+            b"field1": json.dumps({"name": "test1"}).encode(),
+            b"field2": json.dumps({"name": "test2"}).encode(),
+            b"field3": b"simple_value",
+        }
+        mock_client.hgetall = AsyncMock(return_value=test_data)
+        cache.redis_client = mock_client
+
+        result = await cache.hgetall("hash_name")
+
+        mock_client.hgetall.assert_awaited_once_with("hash_name")
+        assert result == {
+            "field1": {"name": "test1"},
+            "field2": {"name": "test2"},
+            "field3": "simple_value",
+        }
+
+    @pytest.mark.asyncio
+    async def test_hgetall_returns_empty_dict_when_hash_not_exists(self, cache):
+        """해시가 존재하지 않을 때 빈 딕셔너리를 반환한다."""
+        mock_client = AsyncMock()
+        mock_client.hgetall = AsyncMock(return_value={})
+        cache.redis_client = mock_client
+
+        result = await cache.hgetall("nonexistent_hash")
+
+        mock_client.hgetall.assert_awaited_once_with("nonexistent_hash")
+        assert result == {}
+
+    @pytest.mark.asyncio
+    async def test_hgetall_handles_string_keys(self, cache):
+        """문자열 키도 올바르게 처리한다."""
+        import json
+
+        mock_client = AsyncMock()
+        # 키가 이미 문자열인 경우
+        test_data = {
+            "field1": json.dumps({"name": "test1"}).encode(),
+            "field2": b"simple_value",
+        }
+        mock_client.hgetall = AsyncMock(return_value=test_data)
+        cache.redis_client = mock_client
+
+        result = await cache.hgetall("hash_name")
+
+        assert result == {"field1": {"name": "test1"}, "field2": "simple_value"}
+
+    @pytest.mark.asyncio
+    async def test_hgetall_handles_redis_error(self, cache, caplog):
+        """Redis 오류 발생 시 빈 딕셔너리를 반환하고 로그를 남긴다."""
+        mock_client = AsyncMock()
+        mock_client.hgetall = AsyncMock(side_effect=Exception("Redis connection error"))
+        cache.redis_client = mock_client
+
+        with caplog.at_level("ERROR"):
+            result = await cache.hgetall("hash_name")
+
+        assert result == {}
+        assert "Cache hgetall error" in caplog.text
+        assert "Redis connection error" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_hgetall_handles_mixed_json_and_string_values(self, cache):
+        """JSON과 문자열 값이 혼합된 경우를 올바르게 처리한다."""
+        import json
+
+        mock_client = AsyncMock()
+        test_data = {
+            b"json_field": json.dumps({"data": "value"}).encode(),
+            b"string_field": b"plain_text",
+            b"number_as_json": json.dumps(12345).encode(),  # JSON으로 인코딩된 숫자
+        }
+        mock_client.hgetall = AsyncMock(return_value=test_data)
+        cache.redis_client = mock_client
+
+        result = await cache.hgetall("hash_name")
+
+        assert result == {
+            "json_field": {"data": "value"},
+            "string_field": "plain_text",
+            "number_as_json": 12345,  # JSON으로 파싱되면 정수로 변환됨
+        }

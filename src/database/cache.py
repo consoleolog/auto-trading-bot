@@ -298,3 +298,74 @@ class RedisCache:
         except Exception as e:
             logger.error(f"Cache set_many error: {e}")
             return False
+
+    # 구조화된 데이터를 위한 해시 연산
+    async def hget(self, name: str, key: str) -> Any | None:
+        """
+        해시에서 필드 값을 가져옵니다.
+
+        Args:
+            name: 해시 이름
+            key: 가져올 필드 키
+
+        Returns:
+            필드 값 또는 찾을 수 없는 경우 None
+        """
+        try:
+            value = await self.redis_client.hget(name, key)
+            if value:
+                try:
+                    return json.loads(value)
+                except JSONDecodeError:
+                    return value.decode("utf-8") if isinstance(value, bytes) else value
+            return None
+        except Exception as e:
+            logger.error(f"Cache hget error: {e}")
+            return None
+
+    async def hset(self, name: str, key: str, value: Any) -> bool:
+        """
+        해시에 필드 값을 설정합니다.
+
+        Args:
+            name: 해시 이름
+            key: 설정할 필드 키
+            value: 설정할 값
+
+        Returns:
+            성공 시 True, 실패 시 False
+        """
+        try:
+            serialized = json.dumps(value) if isinstance(value, (dict, list)) else str(value).encode("utf-8")
+
+            await self.redis_client.hset(name, key, serialized)
+            return True
+        except Exception as e:
+            logger.error(f"Cache hset error: {e}")
+            return False
+
+    async def hgetall(self, name: str) -> dict[str, Any]:
+        """
+        해시의 모든 필드를 가져옵니다.
+
+        Args:
+            name: 해시 이름
+
+        Returns:
+            모든 필드-값 딕셔너리
+        """
+        try:
+            data = await self.redis_client.hgetall(name)
+            result = {}
+
+            for key, value in data.items():
+                key_str = key.decode("utf-8") if isinstance(key, bytes) else key
+                try:
+                    result[key_str] = json.loads(value)
+                except JSONDecodeError:
+                    result[key_str] = value.decode("utf-8") if isinstance(value, bytes) else value
+
+            return result
+        except Exception as e:
+            logger.error(f"Cache hgetall error: {e}")
+            return {}

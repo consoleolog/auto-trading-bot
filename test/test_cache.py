@@ -311,3 +311,116 @@ class TestRedisCache:
 
         # 디코딩 실패 시에도 문자열로 변환 시도
         assert isinstance(result, str)
+
+    # ============= get_with_options =============
+
+    @pytest.mark.asyncio
+    async def test_get_with_options_returns_json_value(self, cache):
+        """JSON으로 저장된 값을 가져온다."""
+        import json
+
+        mock_client = AsyncMock()
+        test_data = {"name": "test", "value": 123}
+        mock_client.get = AsyncMock(return_value=json.dumps(test_data).encode())
+        cache.redis_client = mock_client
+
+        result = await cache.get_with_options("test_key")
+
+        mock_client.get.assert_awaited_once_with("test_key")
+        assert result == test_data
+
+    @pytest.mark.asyncio
+    async def test_get_with_options_returns_default_when_key_not_found(self, cache):
+        """키가 존재하지 않을 때 기본값을 반환한다."""
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock(return_value=None)
+        cache.redis_client = mock_client
+
+        default_value = {"default": "value"}
+        result = await cache.get_with_options("nonexistent_key", default=default_value)
+
+        mock_client.get.assert_awaited_once_with("nonexistent_key")
+        assert result == default_value
+
+    @pytest.mark.asyncio
+    async def test_get_with_options_returns_none_default_when_not_provided(self, cache):
+        """기본값을 제공하지 않으면 None을 반환한다."""
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock(return_value=None)
+        cache.redis_client = mock_client
+
+        result = await cache.get_with_options("nonexistent_key")
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_get_with_options_with_decode_json_false(self, cache):
+        """decode_json=False일 때 JSON 디코딩을 시도하지 않는다."""
+        mock_client = AsyncMock()
+        test_data = b"raw bytes data"
+        mock_client.get = AsyncMock(return_value=test_data)
+        cache.redis_client = mock_client
+
+        result = await cache.get_with_options("test_key", decode_json=False)
+
+        mock_client.get.assert_awaited_once_with("test_key")
+        assert result == "raw bytes data"
+
+    @pytest.mark.asyncio
+    async def test_get_with_options_handles_pickle_value(self, cache):
+        """pickle로 저장된 값을 가져온다."""
+        import pickle
+
+        mock_client = AsyncMock()
+        test_data = [1, 2, 3]
+        pickled_data = pickle.dumps(test_data)
+        mock_client.get = AsyncMock(return_value=pickled_data)
+        cache.redis_client = mock_client
+
+        result = await cache.get_with_options("test_key")
+
+        mock_client.get.assert_awaited_once_with("test_key")
+        assert result == test_data
+
+    @pytest.mark.asyncio
+    async def test_get_with_options_handles_string_value(self, cache):
+        """문자열로 저장된 값을 가져온다."""
+        mock_client = AsyncMock()
+        test_data = b"simple string"
+        mock_client.get = AsyncMock(return_value=test_data)
+        cache.redis_client = mock_client
+
+        result = await cache.get_with_options("test_key")
+
+        assert result == "simple string"
+
+    @pytest.mark.asyncio
+    async def test_get_with_options_handles_redis_error(self, cache, caplog):
+        """Redis 오류 발생 시 기본값을 반환하고 로그를 남긴다."""
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock(side_effect=Exception("Redis connection error"))
+        cache.redis_client = mock_client
+
+        default_value = "error_default"
+        with caplog.at_level("ERROR"):
+            result = await cache.get_with_options("test_key", default=default_value)
+
+        assert result == default_value
+        assert "Cache get error for key test_key" in caplog.text
+        assert "Redis connection error" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_get_with_options_decode_json_false_returns_raw_bytes(self, cache):
+        """decode_json=False일 때 JSON 데이터도 원본 문자열로 반환한다."""
+        import json
+
+        mock_client = AsyncMock()
+        test_data = {"name": "test"}
+        json_bytes = json.dumps(test_data).encode()
+        mock_client.get = AsyncMock(return_value=json_bytes)
+        cache.redis_client = mock_client
+
+        result = await cache.get_with_options("test_key", decode_json=False)
+
+        # JSON 디코딩 없이 문자열로만 변환
+        assert result == json.dumps(test_data)

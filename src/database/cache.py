@@ -102,3 +102,43 @@ class RedisCache:
         except Exception as e:
             logger.error(f"Cache get error for key {key}: {e}")
             return None
+
+    # 하위 호환성을 위한 확장 버전:
+    async def get_with_options(self, key: str, default: Any = None, decode_json: bool = True) -> Any:
+        """
+        옵션을 포함하여 캐시에서 값을 가져옵니다 (내부 사용).
+
+        Args:
+            key: 캐시 키
+            default: 찾을 수 없는 경우 반환할 기본값
+            decode_json: JSON 디코딩 시도 여부
+
+        Returns:
+            캐시된 값 또는 기본값
+        """
+        try:
+            value = await self.redis_client.get(key)
+
+            if value is None:
+                return default
+
+            if decode_json:
+                try:
+                    return json.loads(value)
+                except (JSONDecodeError, ValueError, UnicodeDecodeError):
+                    # 복잡한 객체의 경우 pickle로 폴백
+                    try:
+                        return pickle.loads(value)
+                    except Exception:
+                        # 최종적으로 문자열로 폴백
+                        try:
+                            return value.decode("utf-8") if isinstance(value, bytes) else value
+                        except UnicodeDecodeError:
+                            # 디코딩 실패 시 원본 bytes 반환
+                            return value
+
+            return value.decode("utf-8") if isinstance(value, bytes) else value
+
+        except Exception as e:
+            logger.error(f"Cache get error for key {key}: {e}")
+            return default

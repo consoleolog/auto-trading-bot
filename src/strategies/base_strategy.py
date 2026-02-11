@@ -9,6 +9,7 @@ from src.database import DataStorage
 from src.portfolio.models import PortfolioState
 from src.trading.exchanges.upbit.models import Candle
 
+from ..math import calculate_atr
 from .codes import MarketRegime, SignalDirection, SignalStrength, SignalType
 from .models import Signal, StrategyConfig, TechnicalSignal
 
@@ -122,6 +123,50 @@ class BaseStrategy(ABC):
     def has_position(self) -> bool:
         """전략이 열린 포지션을 가지고 있는지 확인합니다."""
         return self._has_open_position
+
+    @staticmethod
+    def _calculate_take_profit(candles: list[Candle], multiplier: float = 0.7) -> Decimal:
+        """
+        익절가 계산
+
+        현재가 + (atr x 배수)
+        """
+        high_prices = [float(c.high_price) for c in candles]
+        low_prices = [float(c.low_price) for c in candles]
+        close_prices = [float(c.trade_price) for c in candles]
+
+        atr = calculate_atr(
+            highs=np.array(high_prices),
+            lows=np.array(low_prices),
+            closes=np.array(close_prices),
+        )
+        current_atr = Decimal(str(atr[-1]))
+
+        current_price = candles[-1].trade_price
+        take_profit = current_price + (current_atr * Decimal(str(multiplier)))
+        return take_profit
+
+    @staticmethod
+    def _calculate_stop_loss(candles: list[Candle], multiplier: float = 1.0) -> Decimal:
+        """
+        손절가 계산
+
+        현재가 + (atr x 배수)
+        """
+        high_prices = [float(c.high_price) for c in candles]
+        low_prices = [float(c.low_price) for c in candles]
+        close_prices = [float(c.trade_price) for c in candles]
+
+        atr = calculate_atr(
+            highs=np.array(high_prices),
+            lows=np.array(low_prices),
+            closes=np.array(close_prices),
+        )
+        current_atr = Decimal(str(atr[-1]))
+
+        current_price = candles[-1].trade_price
+        stop_loss = current_price + (current_atr * Decimal(str(multiplier)))
+        return stop_loss
 
     async def check_crossover(
         self, name: str, one_values: np.ndarray, two_values: np.ndarray

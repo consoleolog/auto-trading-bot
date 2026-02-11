@@ -1685,3 +1685,137 @@ class TestRedisCache:
         assert result == []
         assert "Cache zrange error" in caplog.text
         assert "Redis connection error" in caplog.text
+
+    # ============= expire =============
+
+    @pytest.mark.asyncio
+    async def test_expire_sets_expiration_time(self, cache):
+        """키의 만료 시간을 설정한다."""
+        mock_client = AsyncMock()
+        mock_client.expire = AsyncMock(return_value=True)
+        cache.redis_client = mock_client
+
+        result = await cache.expire("test_key", 300)
+
+        mock_client.expire.assert_awaited_once_with("test_key", 300)
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_expire_returns_false_when_key_not_exists(self, cache):
+        """키가 존재하지 않을 때 False를 반환한다."""
+        mock_client = AsyncMock()
+        mock_client.expire = AsyncMock(return_value=False)
+        cache.redis_client = mock_client
+
+        result = await cache.expire("nonexistent_key", 300)
+
+        mock_client.expire.assert_awaited_once_with("nonexistent_key", 300)
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_expire_with_different_ttl_values(self, cache):
+        """다양한 TTL 값으로 만료 시간을 설정한다."""
+        mock_client = AsyncMock()
+        mock_client.expire = AsyncMock(return_value=True)
+        cache.redis_client = mock_client
+
+        # 60초
+        result1 = await cache.expire("key1", 60)
+        assert result1 is True
+
+        # 3600초 (1시간)
+        result2 = await cache.expire("key2", 3600)
+        assert result2 is True
+
+        # 1초
+        result3 = await cache.expire("key3", 1)
+        assert result3 is True
+
+        assert mock_client.expire.await_count == 3
+
+    @pytest.mark.asyncio
+    async def test_expire_handles_redis_error(self, cache, caplog):
+        """Redis 오류 발생 시 False를 반환하고 로그를 남긴다."""
+        mock_client = AsyncMock()
+        mock_client.expire = AsyncMock(side_effect=Exception("Redis connection error"))
+        cache.redis_client = mock_client
+
+        with caplog.at_level("ERROR"):
+            result = await cache.expire("test_key", 300)
+
+        assert result is False
+        assert "Cache expire error" in caplog.text
+        assert "Redis connection error" in caplog.text
+
+    # ============= ttl =============
+
+    @pytest.mark.asyncio
+    async def test_ttl_returns_remaining_time(self, cache):
+        """키의 남은 TTL을 반환한다."""
+        mock_client = AsyncMock()
+        mock_client.ttl = AsyncMock(return_value=300)
+        cache.redis_client = mock_client
+
+        result = await cache.ttl("test_key")
+
+        mock_client.ttl.assert_awaited_once_with("test_key")
+        assert result == 300
+
+    @pytest.mark.asyncio
+    async def test_ttl_returns_minus_2_when_key_not_exists(self, cache):
+        """키가 존재하지 않을 때 -2를 반환한다."""
+        mock_client = AsyncMock()
+        mock_client.ttl = AsyncMock(return_value=-2)
+        cache.redis_client = mock_client
+
+        result = await cache.ttl("nonexistent_key")
+
+        mock_client.ttl.assert_awaited_once_with("nonexistent_key")
+        assert result == -2
+
+    @pytest.mark.asyncio
+    async def test_ttl_returns_minus_1_when_no_expiration(self, cache):
+        """키에 만료 시간이 없을 때 -1을 반환한다."""
+        mock_client = AsyncMock()
+        mock_client.ttl = AsyncMock(return_value=-1)
+        cache.redis_client = mock_client
+
+        result = await cache.ttl("persistent_key")
+
+        mock_client.ttl.assert_awaited_once_with("persistent_key")
+        assert result == -1
+
+    @pytest.mark.asyncio
+    async def test_ttl_returns_various_remaining_times(self, cache):
+        """다양한 남은 시간 값을 반환한다."""
+        mock_client = AsyncMock()
+        cache.redis_client = mock_client
+
+        # 10초 남음
+        mock_client.ttl = AsyncMock(return_value=10)
+        result1 = await cache.ttl("key1")
+        assert result1 == 10
+
+        # 3600초 (1시간) 남음
+        mock_client.ttl = AsyncMock(return_value=3600)
+        result2 = await cache.ttl("key2")
+        assert result2 == 3600
+
+        # 1초 남음
+        mock_client.ttl = AsyncMock(return_value=1)
+        result3 = await cache.ttl("key3")
+        assert result3 == 1
+
+    @pytest.mark.asyncio
+    async def test_ttl_handles_redis_error(self, cache, caplog):
+        """Redis 오류 발생 시 -1을 반환하고 로그를 남긴다."""
+        mock_client = AsyncMock()
+        mock_client.ttl = AsyncMock(side_effect=Exception("Redis connection error"))
+        cache.redis_client = mock_client
+
+        with caplog.at_level("ERROR"):
+            result = await cache.ttl("test_key")
+
+        assert result == -1
+        assert "Cache ttl error" in caplog.text
+        assert "Redis connection error" in caplog.text

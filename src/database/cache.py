@@ -474,3 +474,37 @@ class RedisCache:
         except Exception as e:
             logger.error(f"Cache zrange error: {e}")
             return []
+
+    # TTL 관리
+    async def expire(self, key: str, seconds: int) -> bool:
+        """
+        키의 만료 시간을 설정합니다.
+
+        Args:
+            key: 캐시 키
+            seconds: 만료까지 남은 시간 (초 단위)
+
+        Returns:
+            성공 시 True, 실패 시 False
+        """
+        try:
+            return await self.redis_client.expire(key, seconds)
+        except Exception as e:
+            logger.error(f"Cache expire error: {e}")
+            return False
+
+    async def ttl(self, key: str) -> int:
+        """
+        키의 남은 TTL을 가져옵니다.
+
+        Args:
+            key: 캐시 키
+
+        Returns:
+            남은 TTL (초 단위). 키가 없으면 -2, 만료 시간이 없으면 -1
+        """
+        try:
+            return await self.redis_client.ttl(key)
+        except Exception as e:
+            logger.error(f"Cache ttl error: {e}")
+            return -1

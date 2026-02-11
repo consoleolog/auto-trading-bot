@@ -59,6 +59,7 @@ class BaseStrategy(ABC):
     async def evaluate(
         self,
         candles: list[Candle],
+        timeframe: Timeframe,
         regime: MarketRegime,
         portfolio: PortfolioState,
     ) -> Signal | None:
@@ -198,7 +199,7 @@ class BaseStrategy(ABC):
         current_atr = Decimal(str(atr[-1]))
 
         current_price = candles[-1].trade_price
-        stop_loss = current_price + (current_atr * Decimal(str(multiplier)))
+        stop_loss = current_price - (current_atr * Decimal(str(multiplier)))
         return stop_loss
 
     async def check_crossover(

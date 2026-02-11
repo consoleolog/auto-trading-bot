@@ -369,3 +369,71 @@ class RedisCache:
         except Exception as e:
             logger.error(f"Cache hgetall error: {e}")
             return {}
+
+    # 큐를 위한 리스트 연산
+    async def lpush(self, key: str, value: Any) -> int:
+        """
+        리스트의 왼쪽에 값을 추가합니다.
+
+        Args:
+            key: 리스트 키
+            value: 추가할 값
+
+        Returns:
+            리스트의 새로운 길이
+        """
+        try:
+            serialized = json.dumps(value) if isinstance(value, (dict, list)) else str(value)
+            return await self.redis_client.lpush(key, serialized)
+        except Exception as e:
+            logger.error(f"Cache lpush error: {e}")
+            return 0
+
+    async def rpop(self, key: str) -> Any | None:
+        """
+        리스트의 오른쪽에서 값을 제거하고 반환합니다.
+
+        Args:
+            key: 리스트 키
+
+        Returns:
+            제거된 값 또는 리스트가 비어있는 경우 None
+        """
+        try:
+            value = await self.redis_client.rpop(key)
+            if value:
+                try:
+                    return json.loads(value)
+                except JSONDecodeError:
+                    return value.decode("utf-8") if isinstance(value, bytes) else value
+            return None
+        except Exception as e:
+            logger.error(f"Cache rpop error: {e}")
+            return None
+
+    async def lrange(self, key: str, start: int, stop: int) -> list[Any]:
+        """
+        리스트에서 범위의 값들을 가져옵니다.
+
+        Args:
+            key: 리스트 키
+            start: 시작 인덱스 (0부터 시작)
+            stop: 종료 인덱스 (-1은 마지막 요소)
+
+        Returns:
+            지정된 범위의 값 리스트
+        """
+        try:
+            values = await self.redis_client.lrange(key, start, stop)
+            result = []
+
+            for value in values:
+                try:
+                    result.append(json.loads(value))
+                except JSONDecodeError:
+                    result.append(value.decode("utf-8") if isinstance(value, bytes) else value)
+
+            return result
+        except Exception as e:
+            logger.error(f"Cache lrange error: {e}")
+            return []

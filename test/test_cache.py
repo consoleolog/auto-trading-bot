@@ -1319,3 +1319,223 @@ class TestRedisCache:
             "string_field": "plain_text",
             "number_as_json": 12345,  # JSON으로 파싱되면 정수로 변환됨
         }
+
+    # ============= lpush =============
+
+    @pytest.mark.asyncio
+    async def test_lpush_adds_dict_value(self, cache):
+        """딕셔너리 값을 리스트 왼쪽에 추가한다."""
+        import json
+
+        mock_client = AsyncMock()
+        mock_client.lpush = AsyncMock(return_value=1)
+        cache.redis_client = mock_client
+
+        test_value = {"name": "test", "value": 123}
+
+        result = await cache.lpush("list_key", test_value)
+
+        mock_client.lpush.assert_awaited_once_with("list_key", json.dumps(test_value))
+        assert result == 1
+
+    @pytest.mark.asyncio
+    async def test_lpush_adds_list_value(self, cache):
+        """리스트 값을 리스트 왼쪽에 추가한다."""
+        import json
+
+        mock_client = AsyncMock()
+        mock_client.lpush = AsyncMock(return_value=2)
+        cache.redis_client = mock_client
+
+        test_value = [1, 2, 3]
+
+        result = await cache.lpush("list_key", test_value)
+
+        mock_client.lpush.assert_awaited_once_with("list_key", json.dumps(test_value))
+        assert result == 2
+
+    @pytest.mark.asyncio
+    async def test_lpush_adds_string_value(self, cache):
+        """문자열 값을 리스트 왼쪽에 추가한다."""
+        mock_client = AsyncMock()
+        mock_client.lpush = AsyncMock(return_value=1)
+        cache.redis_client = mock_client
+
+        test_value = "simple_string"
+
+        result = await cache.lpush("list_key", test_value)
+
+        mock_client.lpush.assert_awaited_once_with("list_key", test_value)
+        assert result == 1
+
+    @pytest.mark.asyncio
+    async def test_lpush_returns_new_list_length(self, cache):
+        """lpush는 리스트의 새로운 길이를 반환한다."""
+        mock_client = AsyncMock()
+        mock_client.lpush = AsyncMock(return_value=5)
+        cache.redis_client = mock_client
+
+        result = await cache.lpush("list_key", "value")
+
+        assert result == 5
+
+    @pytest.mark.asyncio
+    async def test_lpush_handles_redis_error(self, cache, caplog):
+        """Redis 오류 발생 시 0을 반환하고 로그를 남긴다."""
+        mock_client = AsyncMock()
+        mock_client.lpush = AsyncMock(side_effect=Exception("Redis connection error"))
+        cache.redis_client = mock_client
+
+        with caplog.at_level("ERROR"):
+            result = await cache.lpush("list_key", "value")
+
+        assert result == 0
+        assert "Cache lpush error" in caplog.text
+        assert "Redis connection error" in caplog.text
+
+    # ============= rpop =============
+
+    @pytest.mark.asyncio
+    async def test_rpop_returns_json_value(self, cache):
+        """리스트 오른쪽에서 JSON 값을 제거하고 반환한다."""
+        import json
+
+        mock_client = AsyncMock()
+        test_value = {"name": "test", "value": 123}
+        mock_client.rpop = AsyncMock(return_value=json.dumps(test_value).encode())
+        cache.redis_client = mock_client
+
+        result = await cache.rpop("list_key")
+
+        mock_client.rpop.assert_awaited_once_with("list_key")
+        assert result == test_value
+
+    @pytest.mark.asyncio
+    async def test_rpop_returns_string_value(self, cache):
+        """리스트 오른쪽에서 문자열 값을 제거하고 반환한다."""
+        mock_client = AsyncMock()
+        mock_client.rpop = AsyncMock(return_value=b"simple_string")
+        cache.redis_client = mock_client
+
+        result = await cache.rpop("list_key")
+
+        mock_client.rpop.assert_awaited_once_with("list_key")
+        assert result == "simple_string"
+
+    @pytest.mark.asyncio
+    async def test_rpop_returns_none_when_list_empty(self, cache):
+        """리스트가 비어있을 때 None을 반환한다."""
+        mock_client = AsyncMock()
+        mock_client.rpop = AsyncMock(return_value=None)
+        cache.redis_client = mock_client
+
+        result = await cache.rpop("list_key")
+
+        mock_client.rpop.assert_awaited_once_with("list_key")
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_rpop_handles_redis_error(self, cache, caplog):
+        """Redis 오류 발생 시 None을 반환하고 로그를 남긴다."""
+        mock_client = AsyncMock()
+        mock_client.rpop = AsyncMock(side_effect=Exception("Redis connection error"))
+        cache.redis_client = mock_client
+
+        with caplog.at_level("ERROR"):
+            result = await cache.rpop("list_key")
+
+        assert result is None
+        assert "Cache rpop error" in caplog.text
+        assert "Redis connection error" in caplog.text
+
+    # ============= lrange =============
+
+    @pytest.mark.asyncio
+    async def test_lrange_returns_multiple_json_values(self, cache):
+        """리스트에서 여러 JSON 값을 가져온다."""
+        import json
+
+        mock_client = AsyncMock()
+        test_values = [
+            {"name": "test1"},
+            {"name": "test2"},
+            {"name": "test3"},
+        ]
+        mock_client.lrange = AsyncMock(return_value=[json.dumps(v).encode() for v in test_values])
+        cache.redis_client = mock_client
+
+        result = await cache.lrange("list_key", 0, -1)
+
+        mock_client.lrange.assert_awaited_once_with("list_key", 0, -1)
+        assert result == test_values
+
+    @pytest.mark.asyncio
+    async def test_lrange_returns_string_values(self, cache):
+        """리스트에서 여러 문자열 값을 가져온다."""
+        mock_client = AsyncMock()
+        mock_client.lrange = AsyncMock(return_value=[b"value1", b"value2", b"value3"])
+        cache.redis_client = mock_client
+
+        result = await cache.lrange("list_key", 0, 2)
+
+        mock_client.lrange.assert_awaited_once_with("list_key", 0, 2)
+        assert result == ["value1", "value2", "value3"]
+
+    @pytest.mark.asyncio
+    async def test_lrange_returns_empty_list_when_no_values(self, cache):
+        """범위에 값이 없을 때 빈 리스트를 반환한다."""
+        mock_client = AsyncMock()
+        mock_client.lrange = AsyncMock(return_value=[])
+        cache.redis_client = mock_client
+
+        result = await cache.lrange("list_key", 0, -1)
+
+        mock_client.lrange.assert_awaited_once_with("list_key", 0, -1)
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_lrange_with_specific_range(self, cache):
+        """특정 범위의 값만 가져온다."""
+        import json
+
+        mock_client = AsyncMock()
+        test_values = [{"id": 1}, {"id": 2}]
+        mock_client.lrange = AsyncMock(return_value=[json.dumps(v).encode() for v in test_values])
+        cache.redis_client = mock_client
+
+        result = await cache.lrange("list_key", 1, 2)
+
+        mock_client.lrange.assert_awaited_once_with("list_key", 1, 2)
+        assert result == test_values
+
+    @pytest.mark.asyncio
+    async def test_lrange_handles_mixed_json_and_string_values(self, cache):
+        """JSON과 문자열 값이 혼합된 경우를 올바르게 처리한다."""
+        import json
+
+        mock_client = AsyncMock()
+        mock_values = [
+            json.dumps({"data": "value"}).encode(),
+            b"plain_text",
+            json.dumps([1, 2, 3]).encode(),
+        ]
+        mock_client.lrange = AsyncMock(return_value=mock_values)
+        cache.redis_client = mock_client
+
+        result = await cache.lrange("list_key", 0, -1)
+
+        assert result == [{"data": "value"}, "plain_text", [1, 2, 3]]
+
+    @pytest.mark.asyncio
+    async def test_lrange_handles_redis_error(self, cache, caplog):
+        """Redis 오류 발생 시 빈 리스트를 반환하고 로그를 남긴다."""
+        mock_client = AsyncMock()
+        mock_client.lrange = AsyncMock(side_effect=Exception("Redis connection error"))
+        cache.redis_client = mock_client
+
+        with caplog.at_level("ERROR"):
+            result = await cache.lrange("list_key", 0, -1)
+
+        assert result == []
+        assert "Cache lrange error" in caplog.text
+        assert "Redis connection error" in caplog.text

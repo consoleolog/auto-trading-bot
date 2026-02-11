@@ -830,3 +830,255 @@ class TestRedisCache:
         result = await cache.invalidate("cache:data:*:temp")
 
         assert result == 2
+
+    # ============= get_many =============
+
+    @pytest.mark.asyncio
+    async def test_get_many_returns_multiple_values(self, cache):
+        """여러 키의 값을 한 번에 가져온다."""
+        import json
+
+        mock_client = AsyncMock()
+        test_data = {
+            "key1": {"name": "test1"},
+            "key2": {"name": "test2"},
+            "key3": {"name": "test3"},
+        }
+        mock_values = [
+            json.dumps(test_data["key1"]).encode(),
+            json.dumps(test_data["key2"]).encode(),
+            json.dumps(test_data["key3"]).encode(),
+        ]
+        mock_client.mget = AsyncMock(return_value=mock_values)
+        cache.redis_client = mock_client
+
+        result = await cache.get_many(["key1", "key2", "key3"])
+
+        mock_client.mget.assert_awaited_once_with(["key1", "key2", "key3"])
+        assert result == test_data
+
+    @pytest.mark.asyncio
+    async def test_get_many_excludes_nonexistent_keys(self, cache):
+        """존재하지 않는 키는 결과에 포함되지 않는다."""
+        import json
+
+        mock_client = AsyncMock()
+        # key2는 None (존재하지 않음)
+        mock_values = [json.dumps({"name": "test1"}).encode(), None, json.dumps({"name": "test3"}).encode()]
+        mock_client.mget = AsyncMock(return_value=mock_values)
+        cache.redis_client = mock_client
+
+        result = await cache.get_many(["key1", "key2", "key3"])
+
+        assert "key1" in result
+        assert "key2" not in result
+        assert "key3" in result
+        assert result["key1"] == {"name": "test1"}
+        assert result["key3"] == {"name": "test3"}
+
+    @pytest.mark.asyncio
+    async def test_get_many_returns_string_values(self, cache):
+        """문자열 값도 올바르게 가져온다."""
+        mock_client = AsyncMock()
+        mock_values = [b"value1", b"value2", b"value3"]
+        mock_client.mget = AsyncMock(return_value=mock_values)
+        cache.redis_client = mock_client
+
+        result = await cache.get_many(["key1", "key2", "key3"])
+
+        assert result == {"key1": "value1", "key2": "value2", "key3": "value3"}
+
+    @pytest.mark.asyncio
+    async def test_get_many_returns_empty_dict_when_all_keys_missing(self, cache):
+        """모든 키가 존재하지 않으면 빈 딕셔너리를 반환한다."""
+        mock_client = AsyncMock()
+        mock_values = [None, None, None]
+        mock_client.mget = AsyncMock(return_value=mock_values)
+        cache.redis_client = mock_client
+
+        result = await cache.get_many(["key1", "key2", "key3"])
+
+        assert result == {}
+
+    @pytest.mark.asyncio
+    async def test_get_many_handles_empty_keys_list(self, cache):
+        """빈 키 리스트로 호출해도 빈 딕셔너리를 반환한다."""
+        mock_client = AsyncMock()
+        mock_client.mget = AsyncMock(return_value=[])
+        cache.redis_client = mock_client
+
+        result = await cache.get_many([])
+
+        mock_client.mget.assert_awaited_once_with([])
+        assert result == {}
+
+    @pytest.mark.asyncio
+    async def test_get_many_handles_redis_error(self, cache, caplog):
+        """Redis 오류 발생 시 빈 딕셔너리를 반환하고 로그를 남긴다."""
+        mock_client = AsyncMock()
+        mock_client.mget = AsyncMock(side_effect=Exception("Redis connection error"))
+        cache.redis_client = mock_client
+
+        with caplog.at_level("ERROR"):
+            result = await cache.get_many(["key1", "key2"])
+
+        assert result == {}
+        assert "Cache get_many error" in caplog.text
+        assert "Redis connection error" in caplog.text
+
+    # ============= set_many =============
+
+    @pytest.mark.asyncio
+    async def test_set_many_sets_multiple_values_without_ttl(self, cache):
+        """TTL 없이 여러 값을 설정한다."""
+
+        mock_client = AsyncMock()
+        mock_pipe = AsyncMock()
+        mock_pipe.set = AsyncMock()
+        mock_pipe.execute = AsyncMock()
+        mock_client.pipeline = AsyncMock(return_value=mock_pipe)
+        mock_pipe.__aenter__ = AsyncMock(return_value=mock_pipe)
+        mock_pipe.__aexit__ = AsyncMock(return_value=None)
+        cache.redis_client = mock_client
+
+        test_data = {
+            "key1": {"name": "test1"},
+            "key2": {"name": "test2"},
+            "key3": "simple_value",
+        }
+
+        result = await cache.set_many(test_data)
+
+        assert mock_pipe.set.await_count == 3
+        mock_pipe.execute.assert_awaited_once()
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_set_many_sets_multiple_values_with_ttl(self, cache):
+        """TTL과 함께 여러 값을 설정한다."""
+
+        mock_client = AsyncMock()
+        mock_pipe = AsyncMock()
+        mock_pipe.setex = AsyncMock()
+        mock_pipe.execute = AsyncMock()
+        mock_client.pipeline = AsyncMock(return_value=mock_pipe)
+        mock_pipe.__aenter__ = AsyncMock(return_value=mock_pipe)
+        mock_pipe.__aexit__ = AsyncMock(return_value=None)
+        cache.redis_client = mock_client
+
+        test_data = {
+            "key1": {"name": "test1"},
+            "key2": {"name": "test2"},
+        }
+        ttl = 300
+
+        result = await cache.set_many(test_data, ttl=ttl)
+
+        assert mock_pipe.setex.await_count == 2
+        mock_pipe.execute.assert_awaited_once()
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_set_many_handles_empty_mapping(self, cache):
+        """빈 딕셔너리로 호출해도 성공한다."""
+        mock_client = AsyncMock()
+        mock_pipe = AsyncMock()
+        mock_pipe.execute = AsyncMock()
+        mock_client.pipeline = AsyncMock(return_value=mock_pipe)
+        mock_pipe.__aenter__ = AsyncMock(return_value=mock_pipe)
+        mock_pipe.__aexit__ = AsyncMock(return_value=None)
+        cache.redis_client = mock_client
+
+        result = await cache.set_many({})
+
+        mock_pipe.execute.assert_awaited_once()
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_set_many_serializes_dict_as_json(self, cache):
+        """딕셔너리 값을 JSON으로 직렬화한다."""
+        import json
+
+        mock_client = AsyncMock()
+        mock_pipe = AsyncMock()
+        mock_pipe.set = AsyncMock()
+        mock_pipe.execute = AsyncMock()
+        mock_client.pipeline = AsyncMock(return_value=mock_pipe)
+        mock_pipe.__aenter__ = AsyncMock(return_value=mock_pipe)
+        mock_pipe.__aexit__ = AsyncMock(return_value=None)
+        cache.redis_client = mock_client
+
+        test_data = {"key1": {"name": "test", "value": 123}}
+
+        result = await cache.set_many(test_data)
+
+        # set이 JSON 직렬화된 값으로 호출되었는지 확인
+        call_args = mock_pipe.set.call_args_list[0]
+        assert call_args[0][0] == "key1"
+        assert call_args[0][1] == json.dumps({"name": "test", "value": 123})
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_set_many_serializes_list_as_json(self, cache):
+        """리스트 값을 JSON으로 직렬화한다."""
+        import json
+
+        mock_client = AsyncMock()
+        mock_pipe = AsyncMock()
+        mock_pipe.set = AsyncMock()
+        mock_pipe.execute = AsyncMock()
+        mock_client.pipeline = AsyncMock(return_value=mock_pipe)
+        mock_pipe.__aenter__ = AsyncMock(return_value=mock_pipe)
+        mock_pipe.__aexit__ = AsyncMock(return_value=None)
+        cache.redis_client = mock_client
+
+        test_data = {"key1": [1, 2, 3]}
+
+        result = await cache.set_many(test_data)
+
+        call_args = mock_pipe.set.call_args_list[0]
+        assert call_args[0][0] == "key1"
+        assert call_args[0][1] == json.dumps([1, 2, 3])
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_set_many_serializes_string_as_bytes(self, cache):
+        """문자열 값을 바이트로 직렬화한다."""
+        mock_client = AsyncMock()
+        mock_pipe = AsyncMock()
+        mock_pipe.set = AsyncMock()
+        mock_pipe.execute = AsyncMock()
+        mock_client.pipeline = AsyncMock(return_value=mock_pipe)
+        mock_pipe.__aenter__ = AsyncMock(return_value=mock_pipe)
+        mock_pipe.__aexit__ = AsyncMock(return_value=None)
+        cache.redis_client = mock_client
+
+        test_data = {"key1": "simple_string"}
+
+        result = await cache.set_many(test_data)
+
+        call_args = mock_pipe.set.call_args_list[0]
+        assert call_args[0][0] == "key1"
+        assert call_args[0][1] == b"simple_string"
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_set_many_handles_redis_error(self, cache, caplog):
+        """Redis 오류 발생 시 False를 반환하고 로그를 남긴다."""
+        mock_client = AsyncMock()
+        mock_pipe = AsyncMock()
+        mock_pipe.set = AsyncMock()
+        mock_pipe.execute = AsyncMock(side_effect=Exception("Redis connection error"))
+        mock_client.pipeline = AsyncMock(return_value=mock_pipe)
+        mock_pipe.__aenter__ = AsyncMock(return_value=mock_pipe)
+        mock_pipe.__aexit__ = AsyncMock(return_value=None)
+        cache.redis_client = mock_client
+
+        test_data = {"key1": "value1"}
+
+        with caplog.at_level("ERROR"):
+            result = await cache.set_many(test_data)
+
+        assert result is False
+        assert "Cache set_many error" in caplog.text
+        assert "Redis connection error" in caplog.text

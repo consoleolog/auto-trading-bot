@@ -236,3 +236,65 @@ class RedisCache:
         except Exception as e:
             logger.error(f"Cache invalidate error for pattern {pattern}: {e}")
             return 0
+
+    async def get_many(self, keys: list[str]) -> dict[str, Any]:
+        """
+        캐시에서 여러 값을 한 번에 가져옵니다.
+
+        Args:
+            keys: 가져올 캐시 키 목록
+
+        Returns:
+            키-값 딕셔너리 (존재하지 않는 키는 결과에 포함되지 않음)
+        """
+        try:
+            values = await self.redis_client.mget(keys)
+            result = {}
+
+            for key, value in zip(keys, values, strict=True):
+                if value is not None:
+                    try:
+                        result[key] = json.loads(value)
+                    except JSONDecodeError:
+                        result[key] = value.decode("utf-8") if isinstance(value, bytes) else value
+
+            return result
+
+        except Exception as e:
+            logger.error(f"Cache get_many error: {e}")
+            return {}
+
+    async def set_many(self, mapping: dict[str, Any], ttl: int | None = None) -> bool:
+        """
+        여러 키-값 쌍을 한 번에 설정합니다.
+
+        Args:
+            mapping: 설정할 키-값 딕셔너리
+            ttl: 선택적 TTL (초 단위, None이면 만료 없음)
+
+        Returns:
+            성공 시 True, 실패 시 False
+        """
+        try:
+            # 값 직렬화
+            serialized = {}
+            for key, value in mapping.items():
+                if isinstance(value, (dict, list)):
+                    serialized[key] = json.dumps(value)
+                else:
+                    serialized[key] = str(value).encode("utf-8")
+
+            # 효율성을 위해 파이프라인 사용
+            async with self.redis_client.pipeline() as pipe:
+                for key, value in serialized.items():
+                    if ttl:
+                        await pipe.setex(key, ttl, value)
+                    else:
+                        await pipe.set(key, value)
+                await pipe.execute()
+
+            return True
+
+        except Exception as e:
+            logger.error(f"Cache set_many error: {e}")
+            return False

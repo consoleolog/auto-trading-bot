@@ -508,3 +508,39 @@ class RedisCache:
         except Exception as e:
             logger.error(f"Cache ttl error: {e}")
             return -1
+
+    # 성능 모니터링
+    async def get_statistics(self) -> dict[str, Any]:
+        """
+        캐시 통계 정보를 가져옵니다.
+
+        Returns:
+            캐시 통계 딕셔너리:
+                - used_memory_mb: 사용 중인 메모리 (MB)
+                - connected_clients: 연결된 클라이언트 수
+                - total_commands_processed: 처리된 총 명령 수
+                - keyspace_hits: 캐시 히트 횟수
+                - keyspace_misses: 캐시 미스 횟수
+                - hit_rate: 캐시 히트율 (%)
+                - evicted_keys: 제거된 키 수
+                - expired_keys: 만료된 키 수
+        """
+        try:
+            info = await self.redis_client.info()
+
+            return {
+                "used_memory_mb": info.get("used_memory", 0) / (1024 * 1024),
+                "connected_clients": info.get("connected_clients", 0),
+                "total_commands_processed": info.get("total_commands_processed", 0),
+                "keyspace_hits": info.get("keyspace_hits", 0),
+                "keyspace_misses": info.get("keyspace_misses", 0),
+                "hit_rate": (
+                    info.get("keyspace_hits", 0) / max(info.get("keyspace_hits", 0) + info.get("keyspace_misses", 1), 1)
+                )
+                * 100,
+                "evicted_keys": info.get("evicted_keys", 0),
+                "expired_keys": info.get("expired_keys", 0),
+            }
+        except Exception as e:
+            logger.error(f"Failed to get cache stats: {e}")
+            return {}

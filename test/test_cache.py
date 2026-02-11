@@ -1819,3 +1819,143 @@ class TestRedisCache:
         assert result == -1
         assert "Cache ttl error" in caplog.text
         assert "Redis connection error" in caplog.text
+
+    # ============= get_statistics =============
+
+    @pytest.mark.asyncio
+    async def test_get_statistics_returns_all_metrics(self, cache):
+        """캐시 통계 정보를 모두 반환한다."""
+        mock_client = AsyncMock()
+        mock_info = {
+            "used_memory": 1024 * 1024 * 10,  # 10MB in bytes
+            "connected_clients": 5,
+            "total_commands_processed": 1000,
+            "keyspace_hits": 800,
+            "keyspace_misses": 200,
+            "evicted_keys": 10,
+            "expired_keys": 50,
+        }
+        mock_client.info = AsyncMock(return_value=mock_info)
+        cache.redis_client = mock_client
+
+        result = await cache.get_statistics()
+
+        mock_client.info.assert_awaited_once()
+        assert result["used_memory_mb"] == 10.0
+        assert result["connected_clients"] == 5
+        assert result["total_commands_processed"] == 1000
+        assert result["keyspace_hits"] == 800
+        assert result["keyspace_misses"] == 200
+        assert result["hit_rate"] == 80.0  # 800/(800+200) * 100
+        assert result["evicted_keys"] == 10
+        assert result["expired_keys"] == 50
+
+    @pytest.mark.asyncio
+    async def test_get_statistics_calculates_hit_rate_correctly(self, cache):
+        """캐시 히트율을 정확하게 계산한다."""
+        mock_client = AsyncMock()
+        cache.redis_client = mock_client
+
+        # 100% 히트율
+        mock_client.info = AsyncMock(return_value={"keyspace_hits": 100, "keyspace_misses": 0})
+        result = await cache.get_statistics()
+        assert result["hit_rate"] == 100.0
+
+        # 50% 히트율
+        mock_client.info = AsyncMock(return_value={"keyspace_hits": 50, "keyspace_misses": 50})
+        result = await cache.get_statistics()
+        assert result["hit_rate"] == 50.0
+
+        # 0% 히트율
+        mock_client.info = AsyncMock(return_value={"keyspace_hits": 0, "keyspace_misses": 100})
+        result = await cache.get_statistics()
+        assert result["hit_rate"] == 0.0
+
+    @pytest.mark.asyncio
+    async def test_get_statistics_handles_zero_hits_and_misses(self, cache):
+        """히트와 미스가 모두 0일 때 0% 반환한다."""
+        mock_client = AsyncMock()
+        mock_client.info = AsyncMock(return_value={"keyspace_hits": 0, "keyspace_misses": 0})
+        cache.redis_client = mock_client
+
+        result = await cache.get_statistics()
+
+        assert result["hit_rate"] == 0.0
+
+    @pytest.mark.asyncio
+    async def test_get_statistics_handles_missing_fields(self, cache):
+        """일부 필드가 누락되어도 기본값 0을 사용한다."""
+        mock_client = AsyncMock()
+        mock_client.info = AsyncMock(
+            return_value={
+                "keyspace_hits": 100,
+                # 다른 필드들은 누락
+            }
+        )
+        cache.redis_client = mock_client
+
+        result = await cache.get_statistics()
+
+        assert result["used_memory_mb"] == 0.0
+        assert result["connected_clients"] == 0
+        assert result["total_commands_processed"] == 0
+        assert result["keyspace_hits"] == 100
+        assert result["keyspace_misses"] == 0
+        assert result["evicted_keys"] == 0
+        assert result["expired_keys"] == 0
+
+    @pytest.mark.asyncio
+    async def test_get_statistics_converts_memory_to_mb(self, cache):
+        """메모리를 바이트에서 MB로 변환한다."""
+        mock_client = AsyncMock()
+        cache.redis_client = mock_client
+
+        # 1MB = 1024 * 1024 bytes
+        mock_client.info = AsyncMock(return_value={"used_memory": 1024 * 1024})
+        result = await cache.get_statistics()
+        assert result["used_memory_mb"] == 1.0
+
+        # 100MB
+        mock_client.info = AsyncMock(return_value={"used_memory": 1024 * 1024 * 100})
+        result = await cache.get_statistics()
+        assert result["used_memory_mb"] == 100.0
+
+        # 0.5MB
+        mock_client.info = AsyncMock(return_value={"used_memory": 1024 * 512})
+        result = await cache.get_statistics()
+        assert result["used_memory_mb"] == 0.5
+
+    @pytest.mark.asyncio
+    async def test_get_statistics_handles_redis_error(self, cache, caplog):
+        """Redis 오류 발생 시 빈 딕셔너리를 반환하고 로그를 남긴다."""
+        mock_client = AsyncMock()
+        mock_client.info = AsyncMock(side_effect=Exception("Redis connection error"))
+        cache.redis_client = mock_client
+
+        with caplog.at_level("ERROR"):
+            result = await cache.get_statistics()
+
+        assert result == {}
+        assert "Failed to get cache stats" in caplog.text
+        assert "Redis connection error" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_get_statistics_returns_all_expected_keys(self, cache):
+        """반환된 통계에 모든 예상 키가 포함되어 있다."""
+        mock_client = AsyncMock()
+        mock_client.info = AsyncMock(return_value={})
+        cache.redis_client = mock_client
+
+        result = await cache.get_statistics()
+
+        expected_keys = {
+            "used_memory_mb",
+            "connected_clients",
+            "total_commands_processed",
+            "keyspace_hits",
+            "keyspace_misses",
+            "hit_rate",
+            "evicted_keys",
+            "expired_keys",
+        }
+        assert set(result.keys()) == expected_keys

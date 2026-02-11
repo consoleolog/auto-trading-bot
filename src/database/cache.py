@@ -515,6 +515,41 @@ class RedisCache:
         await pubsub.subscribe(*channel_names)
         return pubsub
 
+    # 원자적 연산
+    async def incr(self, key: str, amount: int = 1) -> int:
+        """
+        값을 원자적으로 증가시킵니다.
+
+        Args:
+            key: 증가시킬 캐시 키
+            amount: 증가시킬 양 (기본값 1)
+
+        Returns:
+            증가 후의 값
+        """
+        try:
+            return await self.redis_client.incrby(key, amount)
+        except Exception as e:
+            logger.error(f"Cache incr error: {e}")
+            return 0
+
+    async def decr(self, key: str, amount: int = 1) -> int:
+        """
+        값을 원자적으로 감소시킵니다.
+
+        Args:
+            key: 감소시킬 캐시 키
+            amount: 감소시킬 양 (기본값 1)
+
+        Returns:
+            감소 후의 값
+        """
+        try:
+            return await self.redis_client.decrby(key, amount)
+        except Exception as e:
+            logger.error(f"Cache decr error: {e}")
+            return 0
+
     # TTL 관리
     async def expire(self, key: str, seconds: int) -> bool:
         """

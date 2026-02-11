@@ -2202,3 +2202,197 @@ class TestRedisCache:
         assert result2 is mock_pubsub2
         assert result1 is not result2
         assert mock_client.pubsub.call_count == 2
+
+    # ============= incr =============
+
+    @pytest.mark.asyncio
+    async def test_incr_increments_value_by_one(self, cache):
+        """값을 1씩 증가시킨다."""
+        mock_client = AsyncMock()
+        mock_client.incrby = AsyncMock(return_value=1)
+        cache.redis_client = mock_client
+
+        result = await cache.incr("counter")
+
+        mock_client.incrby.assert_awaited_once_with("counter", 1)
+        assert result == 1
+
+    @pytest.mark.asyncio
+    async def test_incr_increments_value_by_custom_amount(self, cache):
+        """값을 지정한 양만큼 증가시킨다."""
+        mock_client = AsyncMock()
+        mock_client.incrby = AsyncMock(return_value=15)
+        cache.redis_client = mock_client
+
+        result = await cache.incr("counter", amount=10)
+
+        mock_client.incrby.assert_awaited_once_with("counter", 10)
+        assert result == 15
+
+    @pytest.mark.asyncio
+    async def test_incr_returns_incremented_value(self, cache):
+        """증가 후의 값을 반환한다."""
+        mock_client = AsyncMock()
+        mock_client.incrby = AsyncMock(return_value=100)
+        cache.redis_client = mock_client
+
+        result = await cache.incr("views", amount=5)
+
+        assert result == 100
+
+    @pytest.mark.asyncio
+    async def test_incr_with_large_amount(self, cache):
+        """큰 값으로도 증가시킬 수 있다."""
+        mock_client = AsyncMock()
+        mock_client.incrby = AsyncMock(return_value=1000000)
+        cache.redis_client = mock_client
+
+        result = await cache.incr("big_counter", amount=999999)
+
+        mock_client.incrby.assert_awaited_once_with("big_counter", 999999)
+        assert result == 1000000
+
+    @pytest.mark.asyncio
+    async def test_incr_handles_redis_error(self, cache, caplog):
+        """Redis 오류 발생 시 0을 반환하고 로그를 남긴다."""
+        mock_client = AsyncMock()
+        mock_client.incrby = AsyncMock(side_effect=Exception("Redis connection error"))
+        cache.redis_client = mock_client
+
+        with caplog.at_level("ERROR"):
+            result = await cache.incr("counter")
+
+        assert result == 0
+        assert "Cache incr error" in caplog.text
+        assert "Redis connection error" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_incr_multiple_times_returns_accumulated_value(self, cache):
+        """여러 번 증가시킬 수 있다."""
+        mock_client = AsyncMock()
+        mock_client.incrby = AsyncMock(side_effect=[1, 2, 3, 4, 5])
+        cache.redis_client = mock_client
+
+        result1 = await cache.incr("counter")
+        result2 = await cache.incr("counter")
+        result3 = await cache.incr("counter")
+
+        assert result1 == 1
+        assert result2 == 2
+        assert result3 == 3
+        assert mock_client.incrby.await_count == 3
+
+    @pytest.mark.asyncio
+    async def test_incr_with_negative_amount_decreases_value(self, cache):
+        """음수 양으로 증가시키면 값이 감소한다."""
+        mock_client = AsyncMock()
+        mock_client.incrby = AsyncMock(return_value=5)
+        cache.redis_client = mock_client
+
+        result = await cache.incr("counter", amount=-5)
+
+        mock_client.incrby.assert_awaited_once_with("counter", -5)
+        assert result == 5
+
+    # ============= decr =============
+
+    @pytest.mark.asyncio
+    async def test_decr_decrements_value_by_one(self, cache):
+        """값을 1씩 감소시킨다."""
+        mock_client = AsyncMock()
+        mock_client.decrby = AsyncMock(return_value=9)
+        cache.redis_client = mock_client
+
+        result = await cache.decr("counter")
+
+        mock_client.decrby.assert_awaited_once_with("counter", 1)
+        assert result == 9
+
+    @pytest.mark.asyncio
+    async def test_decr_decrements_value_by_custom_amount(self, cache):
+        """값을 지정한 양만큼 감소시킨다."""
+        mock_client = AsyncMock()
+        mock_client.decrby = AsyncMock(return_value=5)
+        cache.redis_client = mock_client
+
+        result = await cache.decr("counter", amount=10)
+
+        mock_client.decrby.assert_awaited_once_with("counter", 10)
+        assert result == 5
+
+    @pytest.mark.asyncio
+    async def test_decr_returns_decremented_value(self, cache):
+        """감소 후의 값을 반환한다."""
+        mock_client = AsyncMock()
+        mock_client.decrby = AsyncMock(return_value=50)
+        cache.redis_client = mock_client
+
+        result = await cache.decr("stock", amount=5)
+
+        assert result == 50
+
+    @pytest.mark.asyncio
+    async def test_decr_can_go_negative(self, cache):
+        """값이 음수가 될 수 있다."""
+        mock_client = AsyncMock()
+        mock_client.decrby = AsyncMock(return_value=-5)
+        cache.redis_client = mock_client
+
+        result = await cache.decr("balance", amount=10)
+
+        mock_client.decrby.assert_awaited_once_with("balance", 10)
+        assert result == -5
+
+    @pytest.mark.asyncio
+    async def test_decr_with_large_amount(self, cache):
+        """큰 값으로도 감소시킬 수 있다."""
+        mock_client = AsyncMock()
+        mock_client.decrby = AsyncMock(return_value=1)
+        cache.redis_client = mock_client
+
+        result = await cache.decr("big_counter", amount=999999)
+
+        mock_client.decrby.assert_awaited_once_with("big_counter", 999999)
+        assert result == 1
+
+    @pytest.mark.asyncio
+    async def test_decr_handles_redis_error(self, cache, caplog):
+        """Redis 오류 발생 시 0을 반환하고 로그를 남긴다."""
+        mock_client = AsyncMock()
+        mock_client.decrby = AsyncMock(side_effect=Exception("Redis connection error"))
+        cache.redis_client = mock_client
+
+        with caplog.at_level("ERROR"):
+            result = await cache.decr("counter")
+
+        assert result == 0
+        assert "Cache decr error" in caplog.text
+        assert "Redis connection error" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_decr_multiple_times_returns_accumulated_value(self, cache):
+        """여러 번 감소시킬 수 있다."""
+        mock_client = AsyncMock()
+        mock_client.decrby = AsyncMock(side_effect=[9, 8, 7, 6, 5])
+        cache.redis_client = mock_client
+
+        result1 = await cache.decr("counter")
+        result2 = await cache.decr("counter")
+        result3 = await cache.decr("counter")
+
+        assert result1 == 9
+        assert result2 == 8
+        assert result3 == 7
+        assert mock_client.decrby.await_count == 3
+
+    @pytest.mark.asyncio
+    async def test_decr_with_negative_amount_increases_value(self, cache):
+        """음수 양으로 감소시키면 값이 증가한다."""
+        mock_client = AsyncMock()
+        mock_client.decrby = AsyncMock(return_value=15)
+        cache.redis_client = mock_client
+
+        result = await cache.decr("counter", amount=-5)
+
+        mock_client.decrby.assert_awaited_once_with("counter", -5)
+        assert result == 15

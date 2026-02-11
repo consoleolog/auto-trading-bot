@@ -1,13 +1,14 @@
 import asyncio
 import logging
+from datetime import datetime, timedelta
 from signal import SIGINT, SIGTERM, Signals, signal
 from types import FrameType
 
 from src.config import ConfigManager
 from src.database import DataStorage
 from src.database.cache import RedisCache
-from src.trading.core import TradingEngine
 from src.trading.exchanges.upbit import UpbitExecutor
+from src.trading.exchanges.upbit.codes import Timeframe
 
 logger = logging.getLogger(__name__)
 
@@ -22,10 +23,34 @@ class TradingApplication:
         self._storage: DataStorage | None = None
         self._cache: RedisCache | None = None
         self._exchange: UpbitExecutor | None = None
-        self._engine: TradingEngine | None = None
 
         # Runtime state
         self._running = False
+
+        # Trading Infos
+        self.markets: list[str] = self.config.get("trading.markets") or ["USDT-BTC", "USDT-ETH"]
+        self.timeframes: list[Timeframe] = [Timeframe(t) for t in self.config.get("trading.timeframes")] or [
+            Timeframe.HOUR,
+            Timeframe.DAY,
+        ]
+
+        # Cooldowns (market:timeframe -> next_trade_time)
+        self.market_cooldowns: dict[str, datetime] = {}
+        self.cooldown_durations = {
+            Timeframe.SECOND: timedelta(seconds=1),
+            Timeframe.MINUTE_1: timedelta(minutes=1),
+            Timeframe.MINUTE_3: timedelta(minutes=3),
+            Timeframe.MINUTE_5: timedelta(minutes=5),
+            Timeframe.MINUTE_10: timedelta(minutes=10),
+            Timeframe.MINUTE_15: timedelta(minutes=15),
+            Timeframe.HALF_HOUR: timedelta(minutes=30),
+            Timeframe.HOUR: timedelta(hours=1),
+            Timeframe.HOUR_4: timedelta(hours=4),
+            Timeframe.DAY: timedelta(days=1),
+            Timeframe.WEEK: timedelta(weeks=1),
+            Timeframe.MONTH: timedelta(weeks=4),
+            Timeframe.YEAR: timedelta(days=365),
+        }
 
         # shutdown 설정
         self.shutdown_event = asyncio.Event()
@@ -70,15 +95,7 @@ class TradingApplication:
                 test=(self.mode == "development"),
             )
             await self._exchange.connect()
-            self.logger.info(f"✅ Exchange adapter initialized (mode={self.mode.value})")
-
-            # 4. Initialize Trading Engine
-            self._engine = TradingEngine(
-                mode=self.mode,
-                markets=self.config.get("trading.markets"),
-                timeframes=self.config.get("trading.timeframes"),
-            )
-            self.logger.info(f"✅ TradingEngine initialized (mode={self.mode})")
+            self.logger.info(f"✅ Exchange adapter initialized (mode={self.mode})")
 
             self.logger.info("🚀 TradingApplication setup complete!")
             return True
@@ -91,7 +108,7 @@ class TradingApplication:
             self.logger.warning("TradingApplication already running!")
             return
 
-        if self._engine is None:
+        if self._storage is None:
             success = await self.setup()
             if not success:
                 raise RuntimeError("TradingApplication setup failed!")
@@ -101,10 +118,7 @@ class TradingApplication:
         try:
             # TODO: Start main loop
 
-            tasks = [
-                # asyncio.create_task(self.engine)
-                asyncio.create_task(self._shutdown_monitor())
-            ]
+            tasks = [asyncio.create_task(self._shutdown_monitor())]
 
             done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_EXCEPTION)
 
@@ -118,6 +132,27 @@ class TradingApplication:
             self.logger.error(f"Critical error in main loop: {e}", exc_info=True)
         finally:
             await self.shutdown()
+
+    async def _trading_cycle(self):
+        for timeframe in self.timeframes:
+            for market in self.markets:
+                key = f"{market}:{timeframe.value}"
+
+                try:
+                    # 1. Check cooldown if include in `self.market_cooldowns`
+                    if key in self.market_cooldowns:
+                        # 쿨타임 중이면 다음 마켓으로 넘김
+                        if datetime.now() < self.market_cooldowns[key]:
+                            remaining = (self.market_cooldowns[key] - datetime.now()).seconds
+                            if self.mode == "development":
+                                logger.debug(f"  {key}: Skipped - cooldown ({remaining}s remaining)")
+                            continue
+                        else:
+                            self.market_cooldowns[key] = datetime.now() + self.cooldown_durations[timeframe]
+                    else:
+                        self.market_cooldowns[key] = datetime.now() + self.cooldown_durations[timeframe]
+                except Exception as e:
+                    logger.error(f"Error in trading cycle: {e}")
 
     async def _shutdown_monitor(self):
         """Monitor for shutdown signal"""
@@ -138,9 +173,6 @@ class TradingApplication:
                 await self._cache.disconnect()
             if self._exchange:
                 await self._exchange.disconnect()
-            if self._engine:
-                # TODO: engine shutdown or disconnect
-                pass
         except Exception as e:
             self.logger.error(f"Error during shutdown: {e}")
 

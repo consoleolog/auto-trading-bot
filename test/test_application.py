@@ -1,5 +1,5 @@
 import signal
-from unittest.mock import Mock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
@@ -16,6 +16,17 @@ def mock_config():
             "app.mode": "development",
             "trading.markets": ["USDT-BTC", "USDT-ETH"],
             "trading.timeframes": ["minutes/60", "days"],
+            "database.host": "localhost",
+            "database.port": "5432",
+            "database.database": "test_db",
+            "database.user": "test_user",
+            "database.password": "test_password",
+            "redis.host": "localhost",
+            "redis.port": "6379",
+            "redis.password": None,
+            "redis.database": "0",
+            "upbit.api_key": "test_api_key",
+            "upbit.api_secret": "test_api_secret",
         }
         return config_values.get(key)
 
@@ -104,10 +115,9 @@ class TestSignalHandler:
             signal.signal(signal.SIGINT, original_sigint)
             signal.signal(signal.SIGTERM, original_sigterm)
 
-    def test_default_mode_is_development(self, app: TradingApplication, mock_config):
+    def test_default_mode_is_development(self, app: TradingApplication):
         """기본 mode 가 development 이다."""
         assert app.mode == "development"
-        mock_config.get.assert_called_with("app.mode")
 
     def test_custom_mode(self):
         """사용자 지정 mode 가 올바르게 설정된다."""
@@ -116,10 +126,18 @@ class TestSignalHandler:
 
         try:
             config = Mock()
-            config.get.return_value = "production"
+
+            def config_get(key):
+                config_values = {
+                    "app.mode": "production",
+                    "trading.markets": ["USDT-BTC"],
+                    "trading.timeframes": ["minutes/60"],
+                }
+                return config_values.get(key)
+
+            config.get.side_effect = config_get
             app = TradingApplication(config)
             assert app.mode == "production"
-            config.get.assert_called_with("app.mode")
         finally:
             signal.signal(signal.SIGINT, original_sigint)
             signal.signal(signal.SIGTERM, original_sigterm)
@@ -131,16 +149,28 @@ class TestSignalHandler:
 
         try:
             config = Mock()
-            config.get.return_value = None
+
+            def config_get(key):
+                # app.mode는 None을 반환하고, 나머지는 기본값 반환
+                config_values = {
+                    "app.mode": None,
+                    "trading.markets": ["USDT-BTC"],
+                    "trading.timeframes": ["minutes/60"],
+                }
+                return config_values.get(key)
+
+            config.get.side_effect = config_get
             app = TradingApplication(config)
             assert app.mode == "development"
         finally:
             signal.signal(signal.SIGINT, original_sigint)
             signal.signal(signal.SIGTERM, original_sigterm)
 
-    def test_engine_is_initialized_as_none(self, app: TradingApplication):
-        """engine이 None으로 초기화된다."""
-        assert app._engine is None
+    def test_components_are_initialized_as_none(self, app: TradingApplication):
+        """컴포넌트들이 None으로 초기화된다."""
+        assert app._storage is None
+        assert app._cache is None
+        assert app._exchange is None
 
     def test_config_attribute_is_stored(self, app: TradingApplication, mock_config):
         """config 속성이 저장된다."""
@@ -155,36 +185,142 @@ class TestSetup:
     """Setup 관련 테스트"""
 
     @pytest.mark.asyncio
-    async def test_setup_initializes_engine(self, mock_config, monkeypatch):
-        """setup이 TradingEngine을 초기화한다."""
-        from unittest.mock import Mock
+    async def test_setup_initializes_storage(self, mock_config, monkeypatch):
+        """setup이 DataStorage를 초기화한다."""
+        # Mock DataStorage
+        mock_storage = AsyncMock()
+        mock_storage.connect = AsyncMock()
+        mock_storage.health_check = AsyncMock(return_value=True)
+        mock_storage_class = Mock(return_value=mock_storage)
 
-        # TradingEngine mock
-        mock_engine = Mock()
-        mock_trading_engine_class = Mock(return_value=mock_engine)
+        # Mock other components
+        mock_cache = AsyncMock()
+        mock_cache.connect = AsyncMock()
+        mock_cache_class = Mock(return_value=mock_cache)
 
-        monkeypatch.setattr("src.trading.application.TradingEngine", mock_trading_engine_class)
+        mock_exchange = AsyncMock()
+        mock_exchange.connect = AsyncMock()
+        mock_exchange_class = Mock(return_value=mock_exchange)
+
+        monkeypatch.setattr("src.trading.application.DataStorage", mock_storage_class)
+        monkeypatch.setattr("src.trading.application.RedisCache", mock_cache_class)
+        monkeypatch.setattr("src.trading.application.UpbitExecutor", mock_exchange_class)
 
         app = TradingApplication(mock_config)
-        assert app._engine is None
+        assert app._storage is None
 
         success = await app.setup()
 
         assert success is True
-        assert app._engine is mock_engine
-        mock_trading_engine_class.assert_called_once_with(
-            mode="development", markets=["USDT-BTC", "USDT-ETH"], timeframes=["minutes/60", "days"]
+        assert app._storage is mock_storage
+        mock_storage_class.assert_called_once_with(
+            host="localhost",
+            port=5432,
+            database="test_db",
+            user="test_user",
+            password="test_password",
         )
+        mock_storage.connect.assert_awaited_once()
+        mock_storage.health_check.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_setup_returns_false_on_error(self, mock_config, caplog, monkeypatch):
-        """setup 중 에러 발생 시 False를 반환한다."""
+    async def test_setup_initializes_cache(self, mock_config, monkeypatch):
+        """setup이 RedisCache를 초기화한다."""
+        # Mock components
+        mock_storage = AsyncMock()
+        mock_storage.connect = AsyncMock()
+        mock_storage.health_check = AsyncMock(return_value=True)
+        mock_storage_class = Mock(return_value=mock_storage)
 
-        # TradingEngine이 에러를 발생시키도록 설정
-        def mock_engine_error(config):
-            raise RuntimeError("Engine initialization failed")
+        mock_cache = AsyncMock()
+        mock_cache.connect = AsyncMock()
+        mock_cache_class = Mock(return_value=mock_cache)
 
-        monkeypatch.setattr("src.trading.application.TradingEngine", mock_engine_error)
+        mock_exchange = AsyncMock()
+        mock_exchange.connect = AsyncMock()
+        mock_exchange_class = Mock(return_value=mock_exchange)
+
+        monkeypatch.setattr("src.trading.application.DataStorage", mock_storage_class)
+        monkeypatch.setattr("src.trading.application.RedisCache", mock_cache_class)
+        monkeypatch.setattr("src.trading.application.UpbitExecutor", mock_exchange_class)
+
+        app = TradingApplication(mock_config)
+        assert app._cache is None
+
+        success = await app.setup()
+
+        assert success is True
+        assert app._cache is mock_cache
+        mock_cache_class.assert_called_once_with(
+            host="localhost",
+            port=6379,
+            password=None,
+            db=0,
+        )
+        mock_cache.connect.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_setup_initializes_exchange(self, mock_config, monkeypatch):
+        """setup이 UpbitExecutor를 초기화한다."""
+        # Mock components
+        mock_storage = AsyncMock()
+        mock_storage.connect = AsyncMock()
+        mock_storage.health_check = AsyncMock(return_value=True)
+        mock_storage_class = Mock(return_value=mock_storage)
+
+        mock_cache = AsyncMock()
+        mock_cache.connect = AsyncMock()
+        mock_cache_class = Mock(return_value=mock_cache)
+
+        mock_exchange = AsyncMock()
+        mock_exchange.connect = AsyncMock()
+        mock_exchange_class = Mock(return_value=mock_exchange)
+
+        monkeypatch.setattr("src.trading.application.DataStorage", mock_storage_class)
+        monkeypatch.setattr("src.trading.application.RedisCache", mock_cache_class)
+        monkeypatch.setattr("src.trading.application.UpbitExecutor", mock_exchange_class)
+
+        app = TradingApplication(mock_config)
+        assert app._exchange is None
+
+        success = await app.setup()
+
+        assert success is True
+        assert app._exchange is mock_exchange
+        mock_exchange_class.assert_called_once_with(
+            api_key="test_api_key",
+            api_secret="test_api_secret",
+            test=True,  # development mode
+        )
+        mock_exchange.connect.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_setup_returns_false_on_storage_error(self, mock_config, caplog, monkeypatch):
+        """setup 중 DataStorage 에러 발생 시 False를 반환한다."""
+
+        def mock_storage_error(*args, **kwargs):
+            raise RuntimeError("Storage initialization failed")
+
+        monkeypatch.setattr("src.trading.application.DataStorage", mock_storage_error)
+
+        app = TradingApplication(mock_config)
+
+        with caplog.at_level("ERROR"):
+            success = await app.setup()
+
+        assert success is False
+        assert "Setup failed" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_setup_returns_false_on_health_check_failure(self, mock_config, caplog, monkeypatch):
+        """health check 실패 시 False를 반환한다."""
+        # Mock storage with failing health check
+        mock_storage = AsyncMock()
+        mock_storage.connect = AsyncMock()
+        mock_storage.health_check = AsyncMock(return_value=False)
+        mock_storage_class = Mock(return_value=mock_storage)
+
+        monkeypatch.setattr("src.trading.application.DataStorage", mock_storage_class)
 
         app = TradingApplication(mock_config)
 
@@ -197,10 +333,23 @@ class TestSetup:
     @pytest.mark.asyncio
     async def test_setup_logs_success(self, mock_config, caplog, monkeypatch):
         """setup 성공 시 로그를 출력한다."""
-        from unittest.mock import Mock
+        # Mock all components
+        mock_storage = AsyncMock()
+        mock_storage.connect = AsyncMock()
+        mock_storage.health_check = AsyncMock(return_value=True)
+        mock_storage_class = Mock(return_value=mock_storage)
 
-        mock_engine = Mock()
-        monkeypatch.setattr("src.trading.application.TradingEngine", Mock(return_value=mock_engine))
+        mock_cache = AsyncMock()
+        mock_cache.connect = AsyncMock()
+        mock_cache_class = Mock(return_value=mock_cache)
+
+        mock_exchange = AsyncMock()
+        mock_exchange.connect = AsyncMock()
+        mock_exchange_class = Mock(return_value=mock_exchange)
+
+        monkeypatch.setattr("src.trading.application.DataStorage", mock_storage_class)
+        monkeypatch.setattr("src.trading.application.RedisCache", mock_cache_class)
+        monkeypatch.setattr("src.trading.application.UpbitExecutor", mock_exchange_class)
 
         app = TradingApplication(mock_config)
 
@@ -208,7 +357,9 @@ class TestSetup:
             await app.setup()
 
         assert "Setting up trading application components" in caplog.text
-        assert "TradingEngine initialized" in caplog.text
+        assert "TimescaleDB storage initialized" in caplog.text
+        assert "Redis cache initialized" in caplog.text
+        assert "Exchange adapter initialized" in caplog.text
         assert "TradingApplication setup complete" in caplog.text
 
 
@@ -216,31 +367,46 @@ class TestStart:
     """Start 관련 테스트"""
 
     @pytest.mark.asyncio
-    async def test_start_calls_setup_if_engine_is_none(self, mock_config, monkeypatch):
-        """start가 engine이 None일 때 setup을 호출한다."""
-        from unittest.mock import Mock
+    async def test_start_calls_setup_if_storage_is_none(self, mock_config, monkeypatch):
+        """start가 storage가 None일 때 setup을 호출한다."""
+        # Mock all components
+        mock_storage = AsyncMock()
+        mock_storage.connect = AsyncMock()
+        mock_storage.health_check = AsyncMock(return_value=True)
+        mock_storage_class = Mock(return_value=mock_storage)
 
-        mock_engine = Mock()
-        monkeypatch.setattr("src.trading.application.TradingEngine", Mock(return_value=mock_engine))
+        mock_cache = AsyncMock()
+        mock_cache.connect = AsyncMock()
+        mock_cache_class = Mock(return_value=mock_cache)
+
+        mock_exchange = AsyncMock()
+        mock_exchange.connect = AsyncMock()
+        mock_exchange_class = Mock(return_value=mock_exchange)
+
+        monkeypatch.setattr("src.trading.application.DataStorage", mock_storage_class)
+        monkeypatch.setattr("src.trading.application.RedisCache", mock_cache_class)
+        monkeypatch.setattr("src.trading.application.UpbitExecutor", mock_exchange_class)
 
         app = TradingApplication(mock_config)
-        assert app._engine is None
+        assert app._storage is None
 
         # start를 즉시 종료하기 위해 shutdown_event를 미리 설정
         app.shutdown_event.set()
 
         await app.start()
 
-        assert app._engine is mock_engine
+        assert app._storage is mock_storage
+        assert app._cache is mock_cache
+        assert app._exchange is mock_exchange
 
     @pytest.mark.asyncio
     async def test_start_raises_error_if_setup_fails(self, mock_config, monkeypatch):
         """setup 실패 시 RuntimeError를 발생시킨다."""
 
-        def mock_engine_error(config):
+        def mock_storage_error(*args, **kwargs):
             raise RuntimeError("Setup failed")
 
-        monkeypatch.setattr("src.trading.application.TradingEngine", mock_engine_error)
+        monkeypatch.setattr("src.trading.application.DataStorage", mock_storage_error)
 
         app = TradingApplication(mock_config)
 
@@ -250,10 +416,23 @@ class TestStart:
     @pytest.mark.asyncio
     async def test_start_sets_running_flag(self, mock_config, monkeypatch):
         """start가 _running 플래그를 설정한다."""
-        from unittest.mock import Mock
+        # Mock all components
+        mock_storage = AsyncMock()
+        mock_storage.connect = AsyncMock()
+        mock_storage.health_check = AsyncMock(return_value=True)
+        mock_storage_class = Mock(return_value=mock_storage)
 
-        mock_engine = Mock()
-        monkeypatch.setattr("src.trading.application.TradingEngine", Mock(return_value=mock_engine))
+        mock_cache = AsyncMock()
+        mock_cache.connect = AsyncMock()
+        mock_cache_class = Mock(return_value=mock_cache)
+
+        mock_exchange = AsyncMock()
+        mock_exchange.connect = AsyncMock()
+        mock_exchange_class = Mock(return_value=mock_exchange)
+
+        monkeypatch.setattr("src.trading.application.DataStorage", mock_storage_class)
+        monkeypatch.setattr("src.trading.application.RedisCache", mock_cache_class)
+        monkeypatch.setattr("src.trading.application.UpbitExecutor", mock_exchange_class)
 
         app = TradingApplication(mock_config)
         assert app._running is False
@@ -266,15 +445,9 @@ class TestStart:
         # start 메서드가 _running을 True로 설정했다가 shutdown에서 처리됨
 
     @pytest.mark.asyncio
-    async def test_start_warns_if_already_running(self, mock_config, caplog, monkeypatch):
+    async def test_start_warns_if_already_running(self, mock_config, caplog):
         """이미 실행 중일 때 경고를 출력한다."""
-        from unittest.mock import Mock
-
-        mock_engine = Mock()
-        monkeypatch.setattr("src.trading.application.TradingEngine", Mock(return_value=mock_engine))
-
         app = TradingApplication(mock_config)
-        app._engine = mock_engine
         app._running = True
 
         with caplog.at_level("WARNING"):
@@ -285,10 +458,26 @@ class TestStart:
     @pytest.mark.asyncio
     async def test_start_calls_shutdown_on_completion(self, mock_config, monkeypatch):
         """start 완료 시 shutdown을 호출한다."""
-        from unittest.mock import Mock
+        # Mock all components
+        mock_storage = AsyncMock()
+        mock_storage.connect = AsyncMock()
+        mock_storage.health_check = AsyncMock(return_value=True)
+        mock_storage.disconnect = AsyncMock()
+        mock_storage_class = Mock(return_value=mock_storage)
 
-        mock_engine = Mock()
-        monkeypatch.setattr("src.trading.application.TradingEngine", Mock(return_value=mock_engine))
+        mock_cache = AsyncMock()
+        mock_cache.connect = AsyncMock()
+        mock_cache.disconnect = AsyncMock()
+        mock_cache_class = Mock(return_value=mock_cache)
+
+        mock_exchange = AsyncMock()
+        mock_exchange.connect = AsyncMock()
+        mock_exchange.disconnect = AsyncMock()
+        mock_exchange_class = Mock(return_value=mock_exchange)
+
+        monkeypatch.setattr("src.trading.application.DataStorage", mock_storage_class)
+        monkeypatch.setattr("src.trading.application.RedisCache", mock_cache_class)
+        monkeypatch.setattr("src.trading.application.UpbitExecutor", mock_exchange_class)
 
         app = TradingApplication(mock_config)
         shutdown_called = False
@@ -389,46 +578,94 @@ class TestShutdown:
     @pytest.mark.asyncio
     async def test_shutdown_completes_gracefully(self, app: TradingApplication, caplog):
         """shutdown이 정상적으로 완료된다."""
+        app._running = True
         with caplog.at_level("INFO"):
             await app.shutdown()
 
         assert "Initiating graceful shutdown" in caplog.text
 
     @pytest.mark.asyncio
-    async def test_shutdown_handles_engine_if_present(self, app: TradingApplication):
-        """engine이 있을 때 정상적으로 처리한다."""
-        from unittest.mock import Mock
+    async def test_shutdown_disconnects_storage(self, app: TradingApplication):
+        """storage를 disconnect한다."""
+        mock_storage = AsyncMock()
+        mock_storage.disconnect = AsyncMock()
+        app._storage = mock_storage
+        app._running = True
 
-        mock_engine = Mock()
-        app._engine = mock_engine
-
-        # 에러 없이 완료되어야 함
         await app.shutdown()
+
+        mock_storage.disconnect.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_shutdown_disconnects_cache(self, app: TradingApplication):
+        """cache를 disconnect한다."""
+        mock_cache = AsyncMock()
+        mock_cache.disconnect = AsyncMock()
+        app._cache = mock_cache
+        app._running = True
+
+        await app.shutdown()
+
+        mock_cache.disconnect.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_shutdown_disconnects_exchange(self, app: TradingApplication):
+        """exchange를 disconnect한다."""
+        mock_exchange = AsyncMock()
+        mock_exchange.disconnect = AsyncMock()
+        app._exchange = mock_exchange
+        app._running = True
+
+        await app.shutdown()
+
+        mock_exchange.disconnect.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_shutdown_handles_all_components(self, app: TradingApplication):
+        """모든 컴포넌트가 있을 때 정상적으로 처리한다."""
+        mock_storage = AsyncMock()
+        mock_storage.disconnect = AsyncMock()
+        mock_cache = AsyncMock()
+        mock_cache.disconnect = AsyncMock()
+        mock_exchange = AsyncMock()
+        mock_exchange.disconnect = AsyncMock()
+
+        app._storage = mock_storage
+        app._cache = mock_cache
+        app._exchange = mock_exchange
+        app._running = True
+
+        await app.shutdown()
+
+        mock_storage.disconnect.assert_awaited_once()
+        mock_cache.disconnect.assert_awaited_once()
+        mock_exchange.disconnect.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_shutdown_logs_errors(self, app: TradingApplication, caplog):
         """shutdown 중 에러가 발생하면 로깅된다."""
-        from unittest.mock import Mock
-
-        # engine이 에러를 발생시키도록 설정
-        mock_engine = Mock()
-        app._engine = mock_engine
-
-        async def patched_shutdown():
-            app.logger.info("Initiating graceful shutdown...")
-            try:
-                if app._engine:
-                    raise RuntimeError("Test shutdown error")
-            except Exception as e:
-                app.logger.error(f"Error during shutdown: {e}")
-
-        app.shutdown = patched_shutdown
+        mock_storage = AsyncMock()
+        mock_storage.disconnect = AsyncMock(side_effect=RuntimeError("Test shutdown error"))
+        app._storage = mock_storage
+        app._running = True
 
         with caplog.at_level("ERROR"):
             await app.shutdown()
 
         assert "Error during shutdown" in caplog.text
-        assert "Test shutdown error" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_shutdown_does_nothing_if_not_running(self, app: TradingApplication):
+        """실행 중이 아니면 아무것도 하지 않는다."""
+        mock_storage = AsyncMock()
+        mock_storage.disconnect = AsyncMock()
+        app._storage = mock_storage
+        app._running = False
+
+        await app.shutdown()
+
+        # disconnect가 호출되지 않아야 함
+        mock_storage.disconnect.assert_not_awaited()
 
 
 class TestIntegration:
@@ -438,10 +675,27 @@ class TestIntegration:
     async def test_full_startup_and_shutdown_flow(self, mock_config, monkeypatch, caplog):
         """전체 시작 및 종료 플로우가 정상 작동한다."""
         import asyncio
-        from unittest.mock import Mock
 
-        mock_engine = Mock()
-        monkeypatch.setattr("src.trading.application.TradingEngine", Mock(return_value=mock_engine))
+        # Mock all components
+        mock_storage = AsyncMock()
+        mock_storage.connect = AsyncMock()
+        mock_storage.health_check = AsyncMock(return_value=True)
+        mock_storage.disconnect = AsyncMock()
+        mock_storage_class = Mock(return_value=mock_storage)
+
+        mock_cache = AsyncMock()
+        mock_cache.connect = AsyncMock()
+        mock_cache.disconnect = AsyncMock()
+        mock_cache_class = Mock(return_value=mock_cache)
+
+        mock_exchange = AsyncMock()
+        mock_exchange.connect = AsyncMock()
+        mock_exchange.disconnect = AsyncMock()
+        mock_exchange_class = Mock(return_value=mock_exchange)
+
+        monkeypatch.setattr("src.trading.application.DataStorage", mock_storage_class)
+        monkeypatch.setattr("src.trading.application.RedisCache", mock_cache_class)
+        monkeypatch.setattr("src.trading.application.UpbitExecutor", mock_exchange_class)
 
         app = TradingApplication(mock_config)
 
@@ -459,6 +713,8 @@ class TestIntegration:
             # start 완료 대기
             await start_task
 
-        assert "TradingEngine initialized" in caplog.text
+        assert "TimescaleDB storage initialized" in caplog.text
+        assert "Redis cache initialized" in caplog.text
+        assert "Exchange adapter initialized" in caplog.text
         assert "Shutdown signal received" in caplog.text
         assert "Initiating graceful shutdown" in caplog.text

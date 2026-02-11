@@ -5,7 +5,7 @@ from json import JSONDecodeError
 from typing import Any
 
 import redis.asyncio as redis
-from redis.asyncio.client import Redis
+from redis.asyncio.client import PubSub, Redis
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +19,11 @@ class RedisCache:
 
         self.redis_client: Redis | None = None
         self.is_connected = False
+
+        # Pub/Sub channels
+        self.channels = {
+            # TODO: add channels
+        }
 
     async def connect(self) -> None:
         """Redis 서버에 연결을 수립합니다."""
@@ -474,6 +479,41 @@ class RedisCache:
         except Exception as e:
             logger.error(f"Cache zrange error: {e}")
             return []
+
+    # Pub/Sub 연산
+    async def publish(self, channel: str, message: Any) -> int:
+        """
+        채널에 메시지를 발행합니다.
+
+        Args:
+            channel: 메시지를 발행할 채널 이름
+            message: 발행할 메시지 (dict, list 또는 문자열)
+
+        Returns:
+            메시지를 수신한 구독자 수
+        """
+        try:
+            channel_name = self.channels.get(channel, channel)
+            serialized = json.dumps(message) if isinstance(message, (dict, list)) else str(message)
+            return await self.redis_client.publish(channel_name, serialized)
+        except Exception as e:
+            logger.error(f"Cache publish error: {e}")
+            return 0
+
+    async def subscribe(self, *channels) -> PubSub:
+        """
+        채널을 구독합니다.
+
+        Args:
+            *channels: 구독할 채널 이름들
+
+        Returns:
+            PubSub 객체 (메시지를 수신하는 데 사용)
+        """
+        pubsub = self.redis_client.pubsub()
+        channel_names = [self.channels.get(ch, ch) for ch in channels]
+        await pubsub.subscribe(*channel_names)
+        return pubsub
 
     # TTL 관리
     async def expire(self, key: str, seconds: int) -> bool:

@@ -1959,3 +1959,246 @@ class TestRedisCache:
             "expired_keys",
         }
         assert set(result.keys()) == expected_keys
+
+    # ============= publish =============
+
+    @pytest.mark.asyncio
+    async def test_publish_sends_dict_message(self, cache):
+        """딕셔너리 메시지를 채널에 발행한다."""
+        import json
+
+        mock_client = AsyncMock()
+        mock_client.publish = AsyncMock(return_value=3)  # 3명의 구독자가 수신
+        cache.redis_client = mock_client
+
+        test_message = {"event": "trade", "symbol": "BTC", "price": 50000}
+
+        result = await cache.publish("trade_channel", test_message)
+
+        mock_client.publish.assert_awaited_once_with("trade_channel", json.dumps(test_message))
+        assert result == 3
+
+    @pytest.mark.asyncio
+    async def test_publish_sends_list_message(self, cache):
+        """리스트 메시지를 채널에 발행한다."""
+        import json
+
+        mock_client = AsyncMock()
+        mock_client.publish = AsyncMock(return_value=2)
+        cache.redis_client = mock_client
+
+        test_message = [1, 2, 3, 4, 5]
+
+        result = await cache.publish("list_channel", test_message)
+
+        mock_client.publish.assert_awaited_once_with("list_channel", json.dumps(test_message))
+        assert result == 2
+
+    @pytest.mark.asyncio
+    async def test_publish_sends_string_message(self, cache):
+        """문자열 메시지를 채널에 발행한다."""
+        mock_client = AsyncMock()
+        mock_client.publish = AsyncMock(return_value=5)
+        cache.redis_client = mock_client
+
+        test_message = "Hello, subscribers!"
+
+        result = await cache.publish("message_channel", test_message)
+
+        mock_client.publish.assert_awaited_once_with("message_channel", test_message)
+        assert result == 5
+
+    @pytest.mark.asyncio
+    async def test_publish_uses_channel_mapping(self, cache):
+        """channels 매핑에 정의된 채널 이름을 사용한다."""
+        import json
+
+        mock_client = AsyncMock()
+        mock_client.publish = AsyncMock(return_value=1)
+        cache.redis_client = mock_client
+
+        # channels 매핑 설정
+        cache.channels = {"trade": "app:trade:channel", "user": "app:user:channel"}
+
+        test_message = {"data": "test"}
+
+        result = await cache.publish("trade", test_message)
+
+        # 매핑된 채널 이름으로 발행되어야 함
+        mock_client.publish.assert_awaited_once_with("app:trade:channel", json.dumps(test_message))
+        assert result == 1
+
+    @pytest.mark.asyncio
+    async def test_publish_uses_channel_name_directly_if_not_in_mapping(self, cache):
+        """channels 매핑에 없는 채널은 이름을 직접 사용한다."""
+        import json
+
+        mock_client = AsyncMock()
+        mock_client.publish = AsyncMock(return_value=1)
+        cache.redis_client = mock_client
+
+        cache.channels = {"trade": "app:trade:channel"}
+
+        test_message = {"data": "test"}
+
+        result = await cache.publish("custom_channel", test_message)
+
+        # 매핑에 없으므로 채널 이름을 직접 사용
+        mock_client.publish.assert_awaited_once_with("custom_channel", json.dumps(test_message))
+        assert result == 1
+
+    @pytest.mark.asyncio
+    async def test_publish_returns_zero_when_no_subscribers(self, cache):
+        """구독자가 없을 때 0을 반환한다."""
+        mock_client = AsyncMock()
+        mock_client.publish = AsyncMock(return_value=0)
+        cache.redis_client = mock_client
+
+        result = await cache.publish("empty_channel", "message")
+
+        assert result == 0
+
+    @pytest.mark.asyncio
+    async def test_publish_handles_redis_error(self, cache, caplog):
+        """Redis 오류 발생 시 0을 반환하고 로그를 남긴다."""
+        mock_client = AsyncMock()
+        mock_client.publish = AsyncMock(side_effect=Exception("Redis connection error"))
+        cache.redis_client = mock_client
+
+        with caplog.at_level("ERROR"):
+            result = await cache.publish("test_channel", "message")
+
+        assert result == 0
+        assert "Cache publish error" in caplog.text
+        assert "Redis connection error" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_publish_converts_int_to_string(self, cache):
+        """정수 메시지를 문자열로 변환하여 발행한다."""
+        mock_client = AsyncMock()
+        mock_client.publish = AsyncMock(return_value=1)
+        cache.redis_client = mock_client
+
+        test_message = 12345
+
+        result = await cache.publish("number_channel", test_message)
+
+        mock_client.publish.assert_awaited_once_with("number_channel", "12345")
+        assert result == 1
+
+    # ============= subscribe =============
+
+    @pytest.mark.asyncio
+    async def test_subscribe_to_single_channel(self, cache):
+        """단일 채널을 구독한다."""
+        mock_client = AsyncMock()
+        mock_pubsub = AsyncMock()
+        mock_pubsub.subscribe = AsyncMock()
+        mock_client.pubsub = MagicMock(return_value=mock_pubsub)
+        cache.redis_client = mock_client
+
+        result = await cache.subscribe("test_channel")
+
+        mock_client.pubsub.assert_called_once()
+        mock_pubsub.subscribe.assert_awaited_once_with("test_channel")
+        assert result == mock_pubsub
+
+    @pytest.mark.asyncio
+    async def test_subscribe_to_multiple_channels(self, cache):
+        """여러 채널을 동시에 구독한다."""
+        mock_client = AsyncMock()
+        mock_pubsub = AsyncMock()
+        mock_pubsub.subscribe = AsyncMock()
+        mock_client.pubsub = MagicMock(return_value=mock_pubsub)
+        cache.redis_client = mock_client
+
+        result = await cache.subscribe("channel1", "channel2", "channel3")
+
+        mock_client.pubsub.assert_called_once()
+        mock_pubsub.subscribe.assert_awaited_once_with("channel1", "channel2", "channel3")
+        assert result == mock_pubsub
+
+    @pytest.mark.asyncio
+    async def test_subscribe_uses_channel_mapping(self, cache):
+        """channels 매핑에 정의된 채널 이름을 사용한다."""
+        mock_client = AsyncMock()
+        mock_pubsub = AsyncMock()
+        mock_pubsub.subscribe = AsyncMock()
+        mock_client.pubsub = MagicMock(return_value=mock_pubsub)
+        cache.redis_client = mock_client
+
+        cache.channels = {"trade": "app:trade:channel", "user": "app:user:channel"}
+
+        result = await cache.subscribe("trade", "user")
+
+        # 매핑된 채널 이름으로 구독되어야 함
+        mock_pubsub.subscribe.assert_awaited_once_with("app:trade:channel", "app:user:channel")
+        assert result == mock_pubsub
+
+    @pytest.mark.asyncio
+    async def test_subscribe_uses_channel_name_directly_if_not_in_mapping(self, cache):
+        """channels 매핑에 없는 채널은 이름을 직접 사용한다."""
+        mock_client = AsyncMock()
+        mock_pubsub = AsyncMock()
+        mock_pubsub.subscribe = AsyncMock()
+        mock_client.pubsub = MagicMock(return_value=mock_pubsub)
+        cache.redis_client = mock_client
+
+        cache.channels = {"trade": "app:trade:channel"}
+
+        result = await cache.subscribe("custom_channel")
+
+        # 매핑에 없으므로 채널 이름을 직접 사용
+        mock_pubsub.subscribe.assert_awaited_once_with("custom_channel")
+        assert result == mock_pubsub
+
+    @pytest.mark.asyncio
+    async def test_subscribe_mixed_mapped_and_unmapped_channels(self, cache):
+        """매핑된 채널과 매핑되지 않은 채널을 혼합하여 구독한다."""
+        mock_client = AsyncMock()
+        mock_pubsub = AsyncMock()
+        mock_pubsub.subscribe = AsyncMock()
+        mock_client.pubsub = MagicMock(return_value=mock_pubsub)
+        cache.redis_client = mock_client
+
+        cache.channels = {"trade": "app:trade:channel"}
+
+        result = await cache.subscribe("trade", "custom_channel")
+
+        # trade는 매핑된 이름, custom_channel은 직접 사용
+        mock_pubsub.subscribe.assert_awaited_once_with("app:trade:channel", "custom_channel")
+        assert result == mock_pubsub
+
+    @pytest.mark.asyncio
+    async def test_subscribe_returns_pubsub_object(self, cache):
+        """PubSub 객체를 반환한다."""
+        mock_client = AsyncMock()
+        mock_pubsub = AsyncMock()
+        mock_pubsub.subscribe = AsyncMock()
+        mock_client.pubsub = MagicMock(return_value=mock_pubsub)
+        cache.redis_client = mock_client
+
+        result = await cache.subscribe("test_channel")
+
+        assert result is mock_pubsub
+
+    @pytest.mark.asyncio
+    async def test_subscribe_creates_new_pubsub_instance(self, cache):
+        """구독할 때마다 새로운 PubSub 인스턴스를 생성한다."""
+        mock_client = AsyncMock()
+        mock_pubsub1 = AsyncMock()
+        mock_pubsub2 = AsyncMock()
+        mock_pubsub1.subscribe = AsyncMock()
+        mock_pubsub2.subscribe = AsyncMock()
+
+        # pubsub()이 호출될 때마다 다른 객체 반환
+        mock_client.pubsub = MagicMock(side_effect=[mock_pubsub1, mock_pubsub2])
+        cache.redis_client = mock_client
+
+        result1 = await cache.subscribe("channel1")
+        result2 = await cache.subscribe("channel2")
+
+        assert result1 is mock_pubsub1
+        assert result2 is mock_pubsub2
+        assert result1 is not result2
+        assert mock_client.pubsub.call_count == 2

@@ -1,4 +1,8 @@
+import json
 import logging
+import pickle
+from json import JSONDecodeError
+from typing import Any
 
 import redis.asyncio as redis
 from redis.asyncio.client import Redis
@@ -63,3 +67,38 @@ class RedisCache:
             await self.redis_client.config_set("notify-keyspace-events", "Ex")
         except Exception as e:
             logger.warning(f"Could not set keyspace notifications: {e}")
+
+    async def get(self, key: str) -> Any:
+        """
+        캐시에서 값을 가져옵니다.
+
+        Args:
+            key: 캐시 키
+
+        Returns:
+            캐시된 값 또는 찾을 수 없는 경우 None
+        """
+        try:
+            value = await self.redis_client.get(key)
+
+            if value is None:
+                return None
+
+            # 먼저 JSON으로 디코딩 시도
+            try:
+                return json.loads(value)
+            except (JSONDecodeError, ValueError, UnicodeDecodeError):
+                # 복잡한 객체의 경우 pickle로 폴백
+                try:
+                    return pickle.loads(value)
+                except Exception:
+                    # 최종적으로 문자열로 폴백
+                    try:
+                        return value.decode("utf-8") if isinstance(value, bytes) else value
+                    except UnicodeDecodeError:
+                        # 디코딩 실패 시 원본 bytes 반환
+                        return value
+
+        except Exception as e:
+            logger.error(f"Cache get error for key {key}: {e}")
+            return None

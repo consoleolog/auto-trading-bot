@@ -207,3 +207,107 @@ class TestRedisCache:
 
         assert "Could not set keyspace notifications" in caplog.text
         assert "Permission denied" in caplog.text
+
+    # ============= get =============
+
+    @pytest.mark.asyncio
+    async def test_get_returns_json_value(self, cache):
+        """JSON으로 저장된 값을 가져온다."""
+        import json
+
+        mock_client = AsyncMock()
+        test_data = {"name": "test", "value": 123}
+        mock_client.get = AsyncMock(return_value=json.dumps(test_data).encode())
+        cache.redis_client = mock_client
+
+        result = await cache.get("test_key")
+
+        mock_client.get.assert_awaited_once_with("test_key")
+        assert result == test_data
+
+    @pytest.mark.asyncio
+    async def test_get_returns_pickle_value(self, cache):
+        """pickle로 저장된 복잡한 객체를 가져온다."""
+        import pickle
+
+        mock_client = AsyncMock()
+        test_data = {"complex": object()}
+        pickled_data = pickle.dumps(test_data)
+        mock_client.get = AsyncMock(return_value=pickled_data)
+        cache.redis_client = mock_client
+
+        result = await cache.get("test_key")
+
+        mock_client.get.assert_awaited_once_with("test_key")
+        # pickle로 직렬화된 데이터는 동일한 타입이어야 함
+        assert isinstance(result, dict)
+        assert "complex" in result
+
+    @pytest.mark.asyncio
+    async def test_get_returns_string_value(self, cache):
+        """문자열로 저장된 값을 가져온다."""
+        mock_client = AsyncMock()
+        test_data = b"simple string value"
+        mock_client.get = AsyncMock(return_value=test_data)
+        cache.redis_client = mock_client
+
+        result = await cache.get("test_key")
+
+        mock_client.get.assert_awaited_once_with("test_key")
+        assert result == "simple string value"
+
+    @pytest.mark.asyncio
+    async def test_get_returns_none_when_key_not_found(self, cache):
+        """키가 존재하지 않을 때 None을 반환한다."""
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock(return_value=None)
+        cache.redis_client = mock_client
+
+        result = await cache.get("nonexistent_key")
+
+        mock_client.get.assert_awaited_once_with("nonexistent_key")
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_get_handles_redis_error(self, cache, caplog):
+        """Redis 오류 발생 시 None을 반환하고 로그를 남긴다."""
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock(side_effect=Exception("Redis connection error"))
+        cache.redis_client = mock_client
+
+        with caplog.at_level("ERROR"):
+            result = await cache.get("test_key")
+
+        assert result is None
+        assert "Cache get error for key test_key" in caplog.text
+        assert "Redis connection error" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_get_handles_json_decode_fallback_to_pickle(self, cache):
+        """JSON 디코딩 실패 시 pickle로 폴백한다."""
+        import pickle
+
+        mock_client = AsyncMock()
+        # JSON이 아닌 pickle 데이터
+        test_data = [1, 2, 3]
+        pickled_data = pickle.dumps(test_data)
+        mock_client.get = AsyncMock(return_value=pickled_data)
+        cache.redis_client = mock_client
+
+        result = await cache.get("test_key")
+
+        assert result == test_data
+
+    @pytest.mark.asyncio
+    async def test_get_handles_all_decode_failures_fallback_to_string(self, cache):
+        """JSON과 pickle 디코딩 모두 실패 시 문자열로 폴백한다."""
+        mock_client = AsyncMock()
+        # JSON도 아니고 pickle도 아닌 순수 바이트 데이터
+        test_data = b"\x00\x01\x02invalid"
+        mock_client.get = AsyncMock(return_value=test_data)
+        cache.redis_client = mock_client
+
+        result = await cache.get("test_key")
+
+        # 디코딩 실패 시에도 문자열로 변환 시도
+        assert isinstance(result, str)

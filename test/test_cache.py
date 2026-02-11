@@ -714,3 +714,119 @@ class TestRedisCache:
         result = await cache.exists("test_key")
 
         assert result is True
+
+    # ============= invalidate =============
+
+    @pytest.mark.asyncio
+    async def test_invalidate_deletes_matching_keys(self, cache):
+        """패턴과 일치하는 키들을 삭제한다."""
+        mock_client = AsyncMock()
+
+        # scan_iter가 비동기 이터레이터를 반환하도록 모킹
+        async def mock_scan_iter(match):
+            for key in [b"user:1", b"user:2", b"user:3"]:
+                yield key
+
+        mock_client.scan_iter = mock_scan_iter
+        mock_client.delete = AsyncMock(return_value=3)
+        cache.redis_client = mock_client
+
+        result = await cache.invalidate("user:*")
+
+        mock_client.delete.assert_awaited_once_with(b"user:1", b"user:2", b"user:3")
+        assert result == 3
+
+    @pytest.mark.asyncio
+    async def test_invalidate_returns_zero_when_no_keys_match(self, cache):
+        """패턴과 일치하는 키가 없을 때 0을 반환한다."""
+        mock_client = AsyncMock()
+
+        # 빈 이터레이터 반환
+        async def mock_scan_iter(match):
+            return
+            yield  # 이 줄은 실행되지 않지만 제너레이터로 만들기 위해 필요
+
+        mock_client.scan_iter = mock_scan_iter
+        mock_client.delete = AsyncMock()
+        cache.redis_client = mock_client
+
+        result = await cache.invalidate("nonexistent:*")
+
+        # delete가 호출되지 않아야 함
+        mock_client.delete.assert_not_awaited()
+        assert result == 0
+
+    @pytest.mark.asyncio
+    async def test_invalidate_handles_single_matching_key(self, cache):
+        """단일 키만 일치할 때 해당 키를 삭제한다."""
+        mock_client = AsyncMock()
+
+        async def mock_scan_iter(match):
+            yield b"session:abc123"
+
+        mock_client.scan_iter = mock_scan_iter
+        mock_client.delete = AsyncMock(return_value=1)
+        cache.redis_client = mock_client
+
+        result = await cache.invalidate("session:*")
+
+        mock_client.delete.assert_awaited_once_with(b"session:abc123")
+        assert result == 1
+
+    @pytest.mark.asyncio
+    async def test_invalidate_handles_redis_error_during_scan(self, cache, caplog):
+        """scan_iter 중 Redis 오류 발생 시 0을 반환하고 로그를 남긴다."""
+        mock_client = AsyncMock()
+
+        async def mock_scan_iter(match):
+            raise Exception("Redis connection error")
+            yield  # 제너레이터로 만들기 위해 필요
+
+        mock_client.scan_iter = mock_scan_iter
+        cache.redis_client = mock_client
+
+        with caplog.at_level("ERROR"):
+            result = await cache.invalidate("test:*")
+
+        assert result == 0
+        assert "Cache invalidate error for pattern test:*" in caplog.text
+        assert "Redis connection error" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_invalidate_handles_redis_error_during_delete(self, cache, caplog):
+        """delete 중 Redis 오류 발생 시 0을 반환하고 로그를 남긴다."""
+        mock_client = AsyncMock()
+
+        async def mock_scan_iter(match):
+            yield b"test:1"
+            yield b"test:2"
+
+        mock_client.scan_iter = mock_scan_iter
+        mock_client.delete = AsyncMock(side_effect=Exception("Redis delete error"))
+        cache.redis_client = mock_client
+
+        with caplog.at_level("ERROR"):
+            result = await cache.invalidate("test:*")
+
+        assert result == 0
+        assert "Cache invalidate error for pattern test:*" in caplog.text
+        assert "Redis delete error" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_invalidate_with_complex_pattern(self, cache):
+        """복잡한 패턴으로도 올바르게 작동한다."""
+        mock_client = AsyncMock()
+
+        async def mock_scan_iter(match):
+            # 패턴이 올바르게 전달되었는지 확인
+            assert match == "cache:data:*:temp"
+            yield b"cache:data:123:temp"
+            yield b"cache:data:456:temp"
+
+        mock_client.scan_iter = mock_scan_iter
+        mock_client.delete = AsyncMock(return_value=2)
+        cache.redis_client = mock_client
+
+        result = await cache.invalidate("cache:data:*:temp")
+
+        assert result == 2

@@ -213,3 +213,26 @@ class RedisCache:
         except Exception as e:
             logger.error(f"Cache exists error for key {key}: {e}")
             return False
+
+    async def invalidate(self, pattern: str) -> int:
+        """
+        패턴과 일치하는 모든 키를 무효화(삭제)합니다.
+
+        Args:
+            pattern: 삭제할 키의 패턴 (예: "user:*", "session:*")
+
+        Returns:
+            삭제된 키의 개수
+        """
+        try:
+            keys = []
+            async for key in self.redis_client.scan_iter(match=pattern):
+                keys.append(key)
+
+            if keys:
+                return await self.redis_client.delete(*keys)
+            return 0
+
+        except Exception as e:
+            logger.error(f"Cache invalidate error for pattern {pattern}: {e}")
+            return 0

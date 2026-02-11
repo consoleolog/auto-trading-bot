@@ -2,8 +2,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 
-from src.trading.exchanges.upbit.codes import OrderSide, OrderType, SelfMatchPreventionType, TimeInForce
-from src.trading.exchanges.upbit.codes.order_state import OrderState
+from ..codes import OrderSide, OrderState, OrderType, SelfMatchPreventionType, TimeInForce
 
 
 @dataclass

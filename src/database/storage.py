@@ -1,11 +1,11 @@
 import importlib
 import logging
 
-from src.strategies.codes import SignalDirection, SignalStrength, SignalType
-from src.strategies.models import TechnicalSignal
-from src.trading.exchanges.upbit.codes import OrderSide, OrderType, SelfMatchPreventionType, TimeInForce
-from src.trading.exchanges.upbit.codes.order_state import OrderState
-from src.trading.exchanges.upbit.models import Order
+from ..strategies.codes import SignalDirection, SignalStrength, SignalType
+from ..strategies.models import TechnicalSignal
+from ..trading.exchanges.upbit.codes import OrderSide, OrderType, SelfMatchPreventionType, TimeInForce
+from ..trading.exchanges.upbit.codes.order_state import OrderState
+from ..trading.exchanges.upbit.models import Order
 
 try:
     asyncpg = importlib.import_module("asyncpg")

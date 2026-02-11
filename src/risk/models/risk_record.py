@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 
-from src.risk.codes import RiskDecision, RiskSeverity
-from src.risk.models.triggered_rule import TriggeredRule
+from ..codes import RiskDecision, RiskSeverity
+from .triggered_rule import TriggeredRule
 
 
 @dataclass(frozen=True)

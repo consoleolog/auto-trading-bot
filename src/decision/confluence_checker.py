@@ -4,9 +4,10 @@ from decimal import Decimal
 
 import numpy as np
 
-from src.decision.models.trade_candidate import TradeCandidate
 from src.strategies.codes import SignalDirection
 from src.strategies.models import Signal
+
+from .models.trade_candidate import TradeCandidate
 
 logger = logging.getLogger(__name__)
 

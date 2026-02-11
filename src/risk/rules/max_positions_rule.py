@@ -4,9 +4,9 @@
 소규모 자본으로 과도한 분산투자를 방지합니다.
 """
 
-from src.risk import RiskRule
-from src.risk.codes import RiskSeverity
-from src.risk.models import RiskContext, TriggeredRule
+from ..codes import RiskSeverity
+from ..models import RiskContext, TriggeredRule
+from ..risk_rule import RiskRule
 
 
 class MaxPositionsRule(RiskRule):

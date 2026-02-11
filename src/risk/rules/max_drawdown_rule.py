@@ -8,9 +8,9 @@
 
 from decimal import Decimal
 
-from src.risk import RiskRule
-from src.risk.codes import RiskSeverity
-from src.risk.models import RiskContext, TriggeredRule
+from ..codes import RiskSeverity
+from ..models import RiskContext, TriggeredRule
+from ..risk_rule import RiskRule
 
 
 class MaxDrawdownRule(RiskRule):

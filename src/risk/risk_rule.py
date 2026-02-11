@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 
-from src.risk.codes import RiskSeverity
-from src.risk.models import RiskContext, TriggeredRule
+from .codes import RiskSeverity
+from .models import RiskContext, TriggeredRule
 
 
 class RiskRule(ABC):

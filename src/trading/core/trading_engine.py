@@ -1,7 +1,7 @@
 import logging
 from datetime import datetime, timedelta
 
-from src.trading.exchanges.upbit.codes import Timeframe
+from ..exchanges.upbit.codes import Timeframe
 
 logger = logging.getLogger(__name__)
 

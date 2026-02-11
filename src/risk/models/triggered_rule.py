@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from src.risk.codes import RiskSeverity
+from ..codes import RiskSeverity
 
 
 @dataclass(frozen=True)

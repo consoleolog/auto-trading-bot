@@ -9,8 +9,8 @@ from typing import Any
 
 import yaml
 
-from src.config.config_core import ConfigSchema, ConfigSource, ConfigValidationError, ConfigValue
-from src.config.file_watcher import FileWatcher
+from .config_core import ConfigSchema, ConfigSource, ConfigValidationError, ConfigValue
+from .file_watcher import FileWatcher
 
 logger = logging.getLogger(__name__)
 

@@ -2,7 +2,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from decimal import Decimal
 
-from src.portfolio.models import Position
+from .position import Position
 
 
 @dataclass

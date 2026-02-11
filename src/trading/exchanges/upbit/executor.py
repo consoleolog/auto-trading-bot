@@ -7,10 +7,11 @@ from urllib.parse import unquote, urlencode
 
 import jwt
 
-from src.trading.exchanges.upbit import error_handler
-from src.trading.exchanges.upbit.codes import OrderSide, OrderType, SelfMatchPreventionType, Timeframe, TimeInForce
-from src.trading.exchanges.upbit.models import Candle, Order, Ticker
 from src.utils import rate_limit, retry_async
+
+from .codes import OrderSide, OrderType, SelfMatchPreventionType, Timeframe, TimeInForce
+from .errors import error_handler
+from .models import Candle, Order, Ticker
 
 try:
     aiohttp = importlib.import_module("aiohttp")

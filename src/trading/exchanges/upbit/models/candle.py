@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 
-from src.trading.exchanges.upbit.codes import Unit
+from ..codes import Unit
 
 
 @dataclass

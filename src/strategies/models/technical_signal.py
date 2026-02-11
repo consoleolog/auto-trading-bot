@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
-from src.strategies.codes import SignalDirection, SignalStrength, SignalType
+from ..codes import SignalDirection, SignalStrength, SignalType
 
 
 @dataclass

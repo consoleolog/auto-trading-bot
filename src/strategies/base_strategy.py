@@ -1,5 +1,6 @@
 import logging
 from abc import ABC, abstractmethod
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 
@@ -10,6 +11,7 @@ from src.portfolio.models import PortfolioState
 from src.trading.exchanges.upbit.models import Candle
 
 from ..math import calculate_atr
+from ..trading.exchanges.upbit.codes import Timeframe
 from .codes import MarketRegime, SignalDirection, SignalStrength, SignalType
 from .models import Signal, StrategyConfig, TechnicalSignal
 
@@ -123,6 +125,37 @@ class BaseStrategy(ABC):
     def has_position(self) -> bool:
         """전략이 열린 포지션을 가지고 있는지 확인합니다."""
         return self._has_open_position
+
+    # ========================================================================
+    # HELPER METHODS
+    # ========================================================================
+
+    def create_signal(
+        self,
+        market: str,
+        direction: SignalDirection,
+        strength: float,
+        confidence: float,
+        entry_price: Decimal | None = None,
+        stop_loss: Decimal | None = None,
+        take_profit: Decimal | None = None,
+        timeframe: Timeframe | None = None,
+        metadata: dict | None = None,
+    ) -> Signal:
+        """트레이딩 신호를 생성합니다."""
+        return Signal(
+            strategy_id=self.strategy_id,
+            market=market,
+            direction=direction,
+            strength=strength,
+            confidence=confidence,
+            entry_price=entry_price,
+            stop_loss=stop_loss,
+            take_profit=take_profit,
+            timeframe=timeframe,
+            timestamp=datetime.now(tz=timezone.utc),
+            metadata=metadata or {},
+        )
 
     @staticmethod
     def _calculate_take_profit(candles: list[Candle], multiplier: float = 0.7) -> Decimal:

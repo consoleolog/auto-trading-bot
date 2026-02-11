@@ -147,10 +147,10 @@ class DataStorage:
                 sql,
                 order.market,
                 order.uuid,
-                order.side,
-                order.ord_type,
+                order.side.value,
+                order.ord_type.value,
                 order.price,
-                order.state,
+                order.state.value,
                 order.created_at,
                 order.volume,
                 order.remaining_volume,
@@ -160,9 +160,9 @@ class DataStorage:
                 order.paid_fee,
                 order.locked,
                 order.trades_count,
-                order.time_in_force,
+                order.time_in_force.value,
                 order.identifier,
-                order.smp_type,
+                order.smp_type.value,
                 order.prevented_volume,
                 order.prevented_locked,
             )
@@ -267,13 +267,13 @@ class DataStorage:
             await conn.execute(
                 sql,
                 technical_signal.signal_name,
-                technical_signal.signal_type,
+                technical_signal.signal_type.value,
                 technical_signal.signal_value,
-                technical_signal.signal_strength,
-                technical_signal.signal_direction,
+                technical_signal.signal_strength.value,
+                technical_signal.signal_direction.value,
             )
 
-    async def get_technical_signal(self, signal_name: str, signal_type: str):
+    async def get_technical_signal(self, signal_name: str, signal_type: SignalType):
         if not self.is_connected:
             return None
 
@@ -291,7 +291,7 @@ class DataStorage:
         """
 
         async with self._pool.acquire() as conn:
-            row = await conn.fetchrow(sql, signal_name, signal_type)
+            row = await conn.fetchrow(sql, signal_name, signal_type.value)
 
         if row is None:
             return None

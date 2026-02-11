@@ -142,3 +142,38 @@ class RedisCache:
         except Exception as e:
             logger.error(f"Cache get error for key {key}: {e}")
             return default
+
+    async def set(
+        self,
+        key: str,
+        value: Any,
+        ttl: int = 300,
+    ) -> bool:
+        """
+        선택적 TTL과 함께 캐시에 값을 설정합니다.
+
+        Args:
+            key: 캐시 키
+            value: 캐시할 값
+            ttl: 초 단위 유효 시간 (기본값 300)
+        """
+        try:
+            # 값 직렬화
+            if isinstance(value, (dict, list)):
+                serialized = json.dumps(value)
+            elif isinstance(value, (str, int, float)):
+                serialized = str(value).encode("utf-8")
+            else:
+                serialized = pickle.dumps(value)
+
+            # TTL 과 함께 설정 (ttl 은 항상 제공됨)
+            if ttl and ttl > 0:
+                await self.redis_client.setex(key, ttl, serialized)
+            else:
+                # ttl 이 0이거나 음수인 경우, 만료 없이 설정
+                await self.redis_client.set(key, serialized)
+
+            return True
+        except Exception as e:
+            logger.error(f"Cache set error for key {key}: {e}")
+            return False

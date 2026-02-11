@@ -424,3 +424,175 @@ class TestRedisCache:
 
         # JSON 디코딩 없이 문자열로만 변환
         assert result == json.dumps(test_data)
+
+    # ============= set =============
+
+    @pytest.mark.asyncio
+    async def test_set_dict_value_with_ttl(self, cache):
+        """dict 값을 TTL과 함께 설정한다."""
+        import json
+
+        mock_client = AsyncMock()
+        mock_client.setex = AsyncMock()
+        cache.redis_client = mock_client
+
+        test_data = {"name": "test", "value": 123}
+        ttl = 300
+
+        result = await cache.set("test_key", test_data, ttl=ttl)
+
+        mock_client.setex.assert_awaited_once_with("test_key", ttl, json.dumps(test_data))
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_set_list_value_with_ttl(self, cache):
+        """list 값을 TTL과 함께 설정한다."""
+        import json
+
+        mock_client = AsyncMock()
+        mock_client.setex = AsyncMock()
+        cache.redis_client = mock_client
+
+        test_data = [1, 2, 3]
+        ttl = 600
+
+        result = await cache.set("test_key", test_data, ttl=ttl)
+
+        mock_client.setex.assert_awaited_once_with("test_key", ttl, json.dumps(test_data))
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_set_string_value_with_ttl(self, cache):
+        """문자열 값을 TTL과 함께 설정한다."""
+        mock_client = AsyncMock()
+        mock_client.setex = AsyncMock()
+        cache.redis_client = mock_client
+
+        test_data = "simple string"
+        ttl = 300
+
+        result = await cache.set("test_key", test_data, ttl=ttl)
+
+        mock_client.setex.assert_awaited_once_with("test_key", ttl, test_data.encode("utf-8"))
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_set_int_value_with_ttl(self, cache):
+        """정수 값을 TTL과 함께 설정한다."""
+        mock_client = AsyncMock()
+        mock_client.setex = AsyncMock()
+        cache.redis_client = mock_client
+
+        test_data = 12345
+        ttl = 300
+
+        result = await cache.set("test_key", test_data, ttl=ttl)
+
+        mock_client.setex.assert_awaited_once_with("test_key", ttl, str(test_data).encode("utf-8"))
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_set_float_value_with_ttl(self, cache):
+        """실수 값을 TTL과 함께 설정한다."""
+        mock_client = AsyncMock()
+        mock_client.setex = AsyncMock()
+        cache.redis_client = mock_client
+
+        test_data = 123.45
+        ttl = 300
+
+        result = await cache.set("test_key", test_data, ttl=ttl)
+
+        mock_client.setex.assert_awaited_once_with("test_key", ttl, str(test_data).encode("utf-8"))
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_set_complex_object_with_pickle(self, cache):
+        """복잡한 객체를 pickle로 직렬화하여 설정한다."""
+        import pickle
+        from datetime import datetime, timezone
+
+        mock_client = AsyncMock()
+        mock_client.setex = AsyncMock()
+        cache.redis_client = mock_client
+
+        # pickle 가능한 복잡한 객체 사용 (datetime)
+        test_data = datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+        ttl = 300
+
+        result = await cache.set("test_key", test_data, ttl=ttl)
+
+        # pickle로 직렬화되었는지 확인
+        call_args = mock_client.setex.call_args
+        assert call_args[0][0] == "test_key"
+        assert call_args[0][1] == ttl
+        # pickle 데이터인지 확인 (unpickle 가능한지)
+        unpickled = pickle.loads(call_args[0][2])
+        assert unpickled == test_data
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_set_without_expiration_when_ttl_is_zero(self, cache):
+        """TTL이 0인 경우 만료 없이 설정한다."""
+        import json
+
+        mock_client = AsyncMock()
+        mock_client.set = AsyncMock()
+        cache.redis_client = mock_client
+
+        test_data = {"name": "test"}
+        ttl = 0
+
+        result = await cache.set("test_key", test_data, ttl=ttl)
+
+        mock_client.set.assert_awaited_once_with("test_key", json.dumps(test_data))
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_set_without_expiration_when_ttl_is_negative(self, cache):
+        """TTL이 음수인 경우 만료 없이 설정한다."""
+        import json
+
+        mock_client = AsyncMock()
+        mock_client.set = AsyncMock()
+        cache.redis_client = mock_client
+
+        test_data = {"name": "test"}
+        ttl = -1
+
+        result = await cache.set("test_key", test_data, ttl=ttl)
+
+        mock_client.set.assert_awaited_once_with("test_key", json.dumps(test_data))
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_set_uses_default_ttl(self, cache):
+        """TTL을 제공하지 않으면 기본값(300)을 사용한다."""
+        import json
+
+        mock_client = AsyncMock()
+        mock_client.setex = AsyncMock()
+        cache.redis_client = mock_client
+
+        test_data = {"name": "test"}
+
+        result = await cache.set("test_key", test_data)
+
+        mock_client.setex.assert_awaited_once_with("test_key", 300, json.dumps(test_data))
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_set_handles_redis_error(self, cache, caplog):
+        """Redis 오류 발생 시 False를 반환하고 로그를 남긴다."""
+        mock_client = AsyncMock()
+        mock_client.setex = AsyncMock(side_effect=Exception("Redis connection error"))
+        cache.redis_client = mock_client
+
+        test_data = {"name": "test"}
+
+        with caplog.at_level("ERROR"):
+            result = await cache.set("test_key", test_data)
+
+        assert result is False
+        assert "Cache set error for key test_key" in caplog.text
+        assert "Redis connection error" in caplog.text

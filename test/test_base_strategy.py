@@ -1,13 +1,14 @@
 from datetime import datetime, timezone
 from decimal import Decimal
-from unittest.mock import Mock
+from unittest.mock import AsyncMock, Mock
 
+import numpy as np
 import pytest
 
 from src.portfolio.models.portfolio_state import PortfolioState
 from src.strategies.base_strategy import BaseStrategy
-from src.strategies.codes import MarketRegime, SignalDirection
-from src.strategies.models import Signal, StrategyConfig
+from src.strategies.codes import MarketRegime, SignalDirection, SignalStrength, SignalType
+from src.strategies.models import Signal, StrategyConfig, TechnicalSignal
 from src.trading.exchanges.upbit.codes import Timeframe
 from src.trading.exchanges.upbit.models import Candle
 
@@ -499,3 +500,352 @@ class TestBaseStrategy:
 
         strategy.reset_state()
         assert strategy.capital_allocation == 0.25
+
+
+class TestCheckCrossover:
+    """check_crossover() 메서드 테스트"""
+
+    @pytest.fixture
+    def mock_data_storage(self):
+        """Mock DataStorage with async methods"""
+        storage = Mock()
+        storage.save_technical_signal = AsyncMock()
+        storage.get_technical_signal = AsyncMock()
+        return storage
+
+    @pytest.fixture
+    def default_config(self):
+        """기본 전략 설정"""
+        return StrategyConfig(
+            id="test_strategy",
+            name="Test Strategy",
+            capital_allocation=0.25,
+            enabled=True,
+        )
+
+    @pytest.mark.asyncio
+    async def test_check_crossover_detects_golden_cross(self, default_config, mock_data_storage):
+        """골든 크로스를 감지한다."""
+        strategy = ConcreteTestStrategy(default_config, mock_data_storage)
+
+        # 과거: one < two, 현재: one > two (골든 크로스)
+        one_values = np.array([90, 110])  # 90 -> 110으로 상승
+        two_values = np.array([100, 100])  # 100으로 유지
+
+        result = await strategy.check_crossover("MA_CROSS", one_values, two_values)
+
+        assert result is not None
+        assert result.signal_name == "MA_CROSS"
+        assert result.signal_type == SignalType.CROSS_OVER
+        assert result.signal_value == "golden_cross"
+        assert result.signal_strength == SignalStrength.BID
+        assert result.signal_direction == SignalDirection.LONG
+        mock_data_storage.save_technical_signal.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_check_crossover_detects_dead_cross(self, default_config, mock_data_storage):
+        """데드 크로스를 감지한다."""
+        strategy = ConcreteTestStrategy(default_config, mock_data_storage)
+
+        # 과거: one > two, 현재: one < two (데드 크로스)
+        one_values = np.array([110, 90])  # 110 -> 90으로 하락
+        two_values = np.array([100, 100])  # 100으로 유지
+
+        result = await strategy.check_crossover("MA_CROSS", one_values, two_values)
+
+        assert result is not None
+        assert result.signal_name == "MA_CROSS"
+        assert result.signal_type == SignalType.CROSS_OVER
+        assert result.signal_value == "dead_cross"
+        assert result.signal_strength == SignalStrength.ASK
+        assert result.signal_direction == SignalDirection.SHORT
+        mock_data_storage.save_technical_signal.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_check_crossover_returns_existing_signal_when_no_cross(self, default_config, mock_data_storage):
+        """크로스가 없을 때 기존 신호를 반환한다."""
+        strategy = ConcreteTestStrategy(default_config, mock_data_storage)
+
+        # 크로스 없음: one이 계속 two 위에 있음
+        one_values = np.array([110, 120])
+        two_values = np.array([100, 100])
+
+        existing_signal = TechnicalSignal(
+            signal_name="MA_CROSS",
+            signal_type=SignalType.CROSS_OVER,
+            signal_value="golden_cross",
+            signal_strength=SignalStrength.BID,
+            signal_direction=SignalDirection.LONG,
+        )
+        mock_data_storage.get_technical_signal.return_value = existing_signal
+
+        result = await strategy.check_crossover("MA_CROSS", one_values, two_values)
+
+        assert result == existing_signal
+        mock_data_storage.save_technical_signal.assert_not_called()
+        mock_data_storage.get_technical_signal.assert_called_once_with("MA_CROSS", signal_type=SignalType.CROSS_OVER)
+
+    @pytest.mark.asyncio
+    async def test_check_crossover_returns_hold_with_insufficient_data(self, default_config, mock_data_storage):
+        """데이터가 부족할 때 HOLD 신호를 반환한다."""
+        strategy = ConcreteTestStrategy(default_config, mock_data_storage)
+
+        # 배열 길이가 2보다 작음
+        one_values = np.array([100])
+        two_values = np.array([100])
+
+        result = await strategy.check_crossover("MA_CROSS", one_values, two_values)
+
+        assert result is not None
+        assert result.signal_name == "MA_CROSS"
+        assert result.signal_type == SignalType.CROSS_OVER
+        assert result.signal_value == "hold"
+        assert result.signal_strength == SignalStrength.NEUTRAL
+        assert result.signal_direction == SignalDirection.HOLD
+        mock_data_storage.save_technical_signal.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_check_crossover_returns_hold_with_empty_arrays(self, default_config, mock_data_storage):
+        """빈 배열일 때 HOLD 신호를 반환한다."""
+        strategy = ConcreteTestStrategy(default_config, mock_data_storage)
+
+        one_values = np.array([])
+        two_values = np.array([])
+
+        result = await strategy.check_crossover("MA_CROSS", one_values, two_values)
+
+        assert result.signal_value == "hold"
+        assert result.signal_direction == SignalDirection.HOLD
+
+    @pytest.mark.asyncio
+    async def test_check_crossover_handles_exact_equal_values(self, default_config, mock_data_storage):
+        """값이 정확히 같을 때를 처리한다."""
+        strategy = ConcreteTestStrategy(default_config, mock_data_storage)
+
+        # 두 값이 정확히 같음
+        one_values = np.array([100, 100])
+        two_values = np.array([100, 100])
+
+        existing_signal = TechnicalSignal(
+            signal_name="MA_CROSS",
+            signal_type=SignalType.CROSS_OVER,
+            signal_value="hold",
+            signal_strength=SignalStrength.NEUTRAL,
+            signal_direction=SignalDirection.HOLD,
+        )
+        mock_data_storage.get_technical_signal.return_value = existing_signal
+
+        result = await strategy.check_crossover("MA_CROSS", one_values, two_values)
+
+        assert result == existing_signal
+        mock_data_storage.save_technical_signal.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_check_crossover_with_multiple_data_points(self, default_config, mock_data_storage):
+        """여러 데이터 포인트가 있을 때 마지막 두 개만 사용한다."""
+        strategy = ConcreteTestStrategy(default_config, mock_data_storage)
+
+        # 많은 데이터가 있지만 마지막 두 개만 확인
+        one_values = np.array([80, 90, 95, 98, 105])
+        two_values = np.array([100, 100, 100, 100, 100])
+
+        # 마지막 두 개: prev_one=98 < prev_two=100 and curr_one=105 > curr_two=100 -> 골든 크로스
+        result = await strategy.check_crossover("MA_CROSS", one_values, two_values)
+
+        assert result.signal_value == "golden_cross"
+        assert result.signal_direction == SignalDirection.LONG
+
+
+class TestCheckOverLine:
+    """check_over_line() 메서드 테스트"""
+
+    @pytest.fixture
+    def mock_data_storage(self):
+        """Mock DataStorage with async methods"""
+        storage = Mock()
+        storage.save_technical_signal = AsyncMock()
+        storage.get_technical_signal = AsyncMock()
+        return storage
+
+    @pytest.fixture
+    def default_config(self):
+        """기본 전략 설정"""
+        return StrategyConfig(
+            id="test_strategy",
+            name="Test Strategy",
+            capital_allocation=0.25,
+            enabled=True,
+        )
+
+    @pytest.mark.asyncio
+    async def test_check_over_line_detects_overbought(self, default_config, mock_data_storage):
+        """과매수 구간을 감지한다."""
+        strategy = ConcreteTestStrategy(default_config, mock_data_storage)
+
+        value = Decimal("75")
+        overbought = 70
+        oversold = 30
+
+        result = await strategy.check_over_line("RSI", value, overbought, oversold)
+
+        assert result is not None
+        assert result.signal_name == "RSI"
+        assert result.signal_type == SignalType.OVER_LINE
+        assert result.signal_value == "overbought"
+        assert result.signal_strength == SignalStrength.STRONG_ASK
+        assert result.signal_direction == SignalDirection.SHORT
+        mock_data_storage.save_technical_signal.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_check_over_line_detects_oversold(self, default_config, mock_data_storage):
+        """과매도 구간을 감지한다."""
+        strategy = ConcreteTestStrategy(default_config, mock_data_storage)
+
+        value = Decimal("25")
+        overbought = 70
+        oversold = 30
+
+        result = await strategy.check_over_line("RSI", value, overbought, oversold)
+
+        assert result is not None
+        assert result.signal_name == "RSI"
+        assert result.signal_type == SignalType.OVER_LINE
+        assert result.signal_value == "oversold"
+        assert result.signal_strength == SignalStrength.STRONG_BID
+        assert result.signal_direction == SignalDirection.LONG
+        mock_data_storage.save_technical_signal.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_check_over_line_returns_existing_signal_in_neutral_zone(self, default_config, mock_data_storage):
+        """중립 구간일 때 기존 신호를 반환한다."""
+        strategy = ConcreteTestStrategy(default_config, mock_data_storage)
+
+        value = Decimal("50")  # 중립 구간
+        overbought = 70
+        oversold = 30
+
+        existing_signal = TechnicalSignal(
+            signal_name="RSI",
+            signal_type=SignalType.OVER_LINE,
+            signal_value="oversold",
+            signal_strength=SignalStrength.STRONG_BID,
+            signal_direction=SignalDirection.LONG,
+        )
+        mock_data_storage.get_technical_signal.return_value = existing_signal
+
+        result = await strategy.check_over_line("RSI", value, overbought, oversold)
+
+        assert result == existing_signal
+        mock_data_storage.save_technical_signal.assert_not_called()
+        mock_data_storage.get_technical_signal.assert_called_once_with("RSI", signal_type=SignalType.OVER_LINE)
+
+    @pytest.mark.asyncio
+    async def test_check_over_line_exact_threshold_overbought(self, default_config, mock_data_storage):
+        """정확히 과매수 임계값일 때는 중립으로 처리한다."""
+        strategy = ConcreteTestStrategy(default_config, mock_data_storage)
+
+        value = Decimal("70")  # 정확히 임계값
+        overbought = 70
+        oversold = 30
+
+        existing_signal = TechnicalSignal(
+            signal_name="RSI",
+            signal_type=SignalType.OVER_LINE,
+            signal_value="neutral",
+            signal_strength=SignalStrength.NEUTRAL,
+            signal_direction=SignalDirection.HOLD,
+        )
+        mock_data_storage.get_technical_signal.return_value = existing_signal
+
+        result = await strategy.check_over_line("RSI", value, overbought, oversold)
+
+        # value == 70이므로 value > 70은 False, 중립 구간
+        assert result == existing_signal
+        mock_data_storage.save_technical_signal.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_check_over_line_exact_threshold_oversold(self, default_config, mock_data_storage):
+        """정확히 과매도 임계값일 때는 중립으로 처리한다."""
+        strategy = ConcreteTestStrategy(default_config, mock_data_storage)
+
+        value = Decimal("30")  # 정확히 임계값
+        overbought = 70
+        oversold = 30
+
+        existing_signal = TechnicalSignal(
+            signal_name="RSI",
+            signal_type=SignalType.OVER_LINE,
+            signal_value="neutral",
+            signal_strength=SignalStrength.NEUTRAL,
+            signal_direction=SignalDirection.HOLD,
+        )
+        mock_data_storage.get_technical_signal.return_value = existing_signal
+
+        result = await strategy.check_over_line("RSI", value, overbought, oversold)
+
+        # value == 30이므로 value < 30은 False, 중립 구간
+        assert result == existing_signal
+        mock_data_storage.save_technical_signal.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_check_over_line_extreme_overbought(self, default_config, mock_data_storage):
+        """극단적인 과매수 상태를 감지한다."""
+        strategy = ConcreteTestStrategy(default_config, mock_data_storage)
+
+        value = Decimal("95")  # 매우 높은 값
+        overbought = 70
+        oversold = 30
+
+        result = await strategy.check_over_line("RSI", value, overbought, oversold)
+
+        assert result.signal_value == "overbought"
+        assert result.signal_direction == SignalDirection.SHORT
+
+    @pytest.mark.asyncio
+    async def test_check_over_line_extreme_oversold(self, default_config, mock_data_storage):
+        """극단적인 과매도 상태를 감지한다."""
+        strategy = ConcreteTestStrategy(default_config, mock_data_storage)
+
+        value = Decimal("5")  # 매우 낮은 값
+        overbought = 70
+        oversold = 30
+
+        result = await strategy.check_over_line("RSI", value, overbought, oversold)
+
+        assert result.signal_value == "oversold"
+        assert result.signal_direction == SignalDirection.LONG
+
+    @pytest.mark.asyncio
+    async def test_check_over_line_with_different_thresholds(self, default_config, mock_data_storage):
+        """다른 임계값을 사용할 수 있다."""
+        strategy = ConcreteTestStrategy(default_config, mock_data_storage)
+
+        # 스토캐스틱의 일반적인 임계값 80/20
+        value = Decimal("85")
+        overbought = 80
+        oversold = 20
+
+        result = await strategy.check_over_line("STOCH", value, overbought, oversold)
+
+        assert result.signal_value == "overbought"
+        assert result.signal_name == "STOCH"
+
+    @pytest.mark.asyncio
+    async def test_check_over_line_saves_correct_signal_object(self, default_config, mock_data_storage):
+        """올바른 신호 객체를 저장한다."""
+        strategy = ConcreteTestStrategy(default_config, mock_data_storage)
+
+        value = Decimal("75")
+        overbought = 70
+        oversold = 30
+
+        await strategy.check_over_line("RSI", value, overbought, oversold)
+
+        # save_technical_signal이 호출되었는지 확인
+        mock_data_storage.save_technical_signal.assert_called_once()
+
+        # 호출 시 전달된 인자 확인
+        saved_signal = mock_data_storage.save_technical_signal.call_args[0][0]
+        assert isinstance(saved_signal, TechnicalSignal)
+        assert saved_signal.signal_name == "RSI"
+        assert saved_signal.signal_value == "overbought"

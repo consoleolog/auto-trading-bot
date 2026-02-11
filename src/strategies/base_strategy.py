@@ -3,12 +3,14 @@ from abc import ABC, abstractmethod
 from decimal import Decimal
 from typing import Any
 
+import numpy as np
+
 from src.database import DataStorage
 from src.portfolio.models import PortfolioState
 from src.trading.exchanges.upbit.models import Candle
 
-from .codes import MarketRegime
-from .models import Signal, StrategyConfig
+from .codes import MarketRegime, SignalDirection, SignalStrength, SignalType
+from .models import Signal, StrategyConfig, TechnicalSignal
 
 logger = logging.getLogger(__name__)
 
@@ -120,3 +122,85 @@ class BaseStrategy(ABC):
     def has_position(self) -> bool:
         """전략이 열린 포지션을 가지고 있는지 확인합니다."""
         return self._has_open_position
+
+    async def check_crossover(
+        self, name: str, one_values: np.ndarray, two_values: np.ndarray
+    ) -> TechnicalSignal | None:
+        """
+        크로스오버 확인
+
+        Args:
+            name: 지표 이름
+            one_values: 기준이 될 값
+            two_values: 비교할 값
+        """
+        if len(one_values) < 2 or len(two_values) < 2:
+            return TechnicalSignal(
+                signal_name=name,
+                signal_type=SignalType.CROSS_OVER,
+                signal_value="hold",
+                signal_strength=SignalStrength.NEUTRAL,
+                signal_direction=SignalDirection.HOLD,
+            )
+
+        prev_one, curr_one = one_values[-2], one_values[-1]
+        prev_two, curr_two = two_values[-2], two_values[-1]
+
+        # 과거 (one < two) and 현재 (one > two) -> GOLDEN CROSS
+        if prev_one < prev_two and curr_one > curr_two:
+            signal = TechnicalSignal(
+                signal_name=name,
+                signal_type=SignalType.CROSS_OVER,
+                signal_value="golden_cross",
+                signal_strength=SignalStrength.BID,
+                signal_direction=SignalDirection.LONG,
+            )
+            await self._data_storage.save_technical_signal(signal)
+            return signal
+        # 과거 (one > two) and 현재 (one < two) -> DEAD CROSS
+        elif prev_one > prev_two and curr_one < curr_two:
+            signal = TechnicalSignal(
+                signal_name=name,
+                signal_type=SignalType.CROSS_OVER,
+                signal_value="dead_cross",
+                signal_strength=SignalStrength.ASK,
+                signal_direction=SignalDirection.SHORT,
+            )
+            await self._data_storage.save_technical_signal(signal)
+            return signal
+        else:
+            return await self._data_storage.get_technical_signal(name, signal_type=SignalType.CROSS_OVER)
+
+    async def check_over_line(self, name: str, value: Decimal, overbought: int, oversold: int) -> TechnicalSignal:
+        """
+        과매수/과매도 판단
+
+        Args:
+            name: 지표 이름
+            value: 확인할 값
+            overbought: 과매수 임계값
+            oversold: 과매도 임계값
+        """
+        # value > 과매수 임계값 -> OVER BOUGHT
+        if value > Decimal(str(overbought)):
+            signal = TechnicalSignal(
+                signal_name=name,
+                signal_type=SignalType.OVER_LINE,
+                signal_value="overbought",
+                signal_strength=SignalStrength.STRONG_ASK,
+                signal_direction=SignalDirection.SHORT,
+            )
+            await self._data_storage.save_technical_signal(signal)
+            return signal
+        elif value < Decimal(str(oversold)):
+            signal = TechnicalSignal(
+                signal_name=name,
+                signal_type=SignalType.OVER_LINE,
+                signal_value="oversold",
+                signal_strength=SignalStrength.STRONG_BID,
+                signal_direction=SignalDirection.LONG,
+            )
+            await self._data_storage.save_technical_signal(signal)
+            return signal
+        else:
+            return await self._data_storage.get_technical_signal(name, signal_type=SignalType.OVER_LINE)

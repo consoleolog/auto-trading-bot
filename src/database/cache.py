@@ -6,6 +6,7 @@ from typing import Any
 
 import redis.asyncio as redis
 from redis.asyncio.client import PubSub, Redis
+from redis.asyncio.lock import Lock
 
 logger = logging.getLogger(__name__)
 
@@ -619,3 +620,43 @@ class RedisCache:
         except Exception as e:
             logger.error(f"Failed to get cache stats: {e}")
             return {}
+
+    # 분산 락
+    async def acquire_lock(self, resource: str, timeout: int = 10, blocking: bool = True) -> Lock | None:
+        """
+        리소스에 대한 분산 락을 획득합니다.
+
+        Args:
+            resource: 락을 획득할 리소스 이름
+            timeout: 락 타임아웃 (초 단위, 기본값 10)
+            blocking: True이면 락을 획득할 때까지 대기, False이면 즉시 반환
+
+        Returns:
+            Lock 객체 (성공 시) 또는 None (실패 시)
+        """
+        try:
+            lock = self.redis_client.lock(f"lock:{resource}", timeout=timeout, blocking=blocking)
+            if await lock.acquire():
+                return lock
+            return None
+        except Exception as e:
+            logger.error(f"Failed to acquire lock: {e}")
+            return None
+
+    @staticmethod
+    async def release_lock(lock: Lock) -> bool:
+        """
+        분산 락을 해제합니다.
+
+        Args:
+            lock: 해제할 Lock 객체
+
+        Returns:
+            성공 시 True, 실패 시 False
+        """
+        try:
+            await lock.release()
+            return True
+        except Exception as e:
+            logger.error(f"Failed to release lock: {e}")
+            return False

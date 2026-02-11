@@ -2396,3 +2396,199 @@ class TestRedisCache:
 
         mock_client.decrby.assert_awaited_once_with("counter", -5)
         assert result == 15
+
+    # ============= acquire_lock =============
+
+    @pytest.mark.asyncio
+    async def test_acquire_lock_successfully_acquires_lock(self, cache):
+        """락을 성공적으로 획득한다."""
+        mock_client = AsyncMock()
+        mock_lock = AsyncMock()
+        mock_lock.acquire = AsyncMock(return_value=True)
+        mock_client.lock = MagicMock(return_value=mock_lock)
+        cache.redis_client = mock_client
+
+        result = await cache.acquire_lock("resource1")
+
+        mock_client.lock.assert_called_once_with("lock:resource1", timeout=10, blocking=True)
+        mock_lock.acquire.assert_awaited_once()
+        assert result is mock_lock
+
+    @pytest.mark.asyncio
+    async def test_acquire_lock_with_custom_timeout(self, cache):
+        """지정한 타임아웃으로 락을 획득한다."""
+        mock_client = AsyncMock()
+        mock_lock = AsyncMock()
+        mock_lock.acquire = AsyncMock(return_value=True)
+        mock_client.lock = MagicMock(return_value=mock_lock)
+        cache.redis_client = mock_client
+
+        result = await cache.acquire_lock("resource1", timeout=30)
+
+        mock_client.lock.assert_called_once_with("lock:resource1", timeout=30, blocking=True)
+        mock_lock.acquire.assert_awaited_once()
+        assert result is mock_lock
+
+    @pytest.mark.asyncio
+    async def test_acquire_lock_with_non_blocking_mode(self, cache):
+        """논블로킹 모드로 락을 획득한다."""
+        mock_client = AsyncMock()
+        mock_lock = AsyncMock()
+        mock_lock.acquire = AsyncMock(return_value=True)
+        mock_client.lock = MagicMock(return_value=mock_lock)
+        cache.redis_client = mock_client
+
+        result = await cache.acquire_lock("resource1", blocking=False)
+
+        mock_client.lock.assert_called_once_with("lock:resource1", timeout=10, blocking=False)
+        mock_lock.acquire.assert_awaited_once()
+        assert result is mock_lock
+
+    @pytest.mark.asyncio
+    async def test_acquire_lock_returns_none_when_acquisition_fails(self, cache):
+        """락 획득 실패 시 None을 반환한다."""
+        mock_client = AsyncMock()
+        mock_lock = AsyncMock()
+        mock_lock.acquire = AsyncMock(return_value=False)
+        mock_client.lock = MagicMock(return_value=mock_lock)
+        cache.redis_client = mock_client
+
+        result = await cache.acquire_lock("resource1")
+
+        mock_lock.acquire.assert_awaited_once()
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_acquire_lock_prefixes_resource_name_with_lock(self, cache):
+        """리소스 이름에 'lock:' 접두사를 붙인다."""
+        mock_client = AsyncMock()
+        mock_lock = AsyncMock()
+        mock_lock.acquire = AsyncMock(return_value=True)
+        mock_client.lock = MagicMock(return_value=mock_lock)
+        cache.redis_client = mock_client
+
+        await cache.acquire_lock("my_resource")
+
+        # lock:my_resource 형태로 호출되어야 함
+        mock_client.lock.assert_called_once_with("lock:my_resource", timeout=10, blocking=True)
+
+    @pytest.mark.asyncio
+    async def test_acquire_lock_handles_redis_error(self, cache, caplog):
+        """Redis 오류 발생 시 None을 반환하고 로그를 남긴다."""
+        mock_client = AsyncMock()
+        mock_client.lock = MagicMock(side_effect=Exception("Redis connection error"))
+        cache.redis_client = mock_client
+
+        with caplog.at_level("ERROR"):
+            result = await cache.acquire_lock("resource1")
+
+        assert result is None
+        assert "Failed to acquire lock" in caplog.text
+        assert "Redis connection error" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_acquire_lock_handles_acquire_error(self, cache, caplog):
+        """락 획득 중 오류 발생 시 None을 반환하고 로그를 남긴다."""
+        mock_client = AsyncMock()
+        mock_lock = AsyncMock()
+        mock_lock.acquire = AsyncMock(side_effect=Exception("Lock acquire error"))
+        mock_client.lock = MagicMock(return_value=mock_lock)
+        cache.redis_client = mock_client
+
+        with caplog.at_level("ERROR"):
+            result = await cache.acquire_lock("resource1")
+
+        assert result is None
+        assert "Failed to acquire lock" in caplog.text
+        assert "Lock acquire error" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_acquire_lock_with_all_custom_parameters(self, cache):
+        """모든 파라미터를 커스터마이즈하여 락을 획득한다."""
+        mock_client = AsyncMock()
+        mock_lock = AsyncMock()
+        mock_lock.acquire = AsyncMock(return_value=True)
+        mock_client.lock = MagicMock(return_value=mock_lock)
+        cache.redis_client = mock_client
+
+        result = await cache.acquire_lock("critical_resource", timeout=60, blocking=False)
+
+        mock_client.lock.assert_called_once_with("lock:critical_resource", timeout=60, blocking=False)
+        mock_lock.acquire.assert_awaited_once()
+        assert result is mock_lock
+
+    # ============= release_lock =============
+
+    @pytest.mark.asyncio
+    async def test_release_lock_successfully_releases_lock(self, cache):
+        """락을 성공적으로 해제한다."""
+        mock_lock = AsyncMock()
+        mock_lock.release = AsyncMock()
+
+        result = await cache.release_lock(mock_lock)
+
+        mock_lock.release.assert_awaited_once()
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_release_lock_is_static_method(self, cache):
+        """release_lock은 정적 메서드이므로 인스턴스 없이 호출 가능하다."""
+        from src.database.cache import RedisCache
+
+        mock_lock = AsyncMock()
+        mock_lock.release = AsyncMock()
+
+        # 클래스에서 직접 호출
+        result = await RedisCache.release_lock(mock_lock)
+
+        mock_lock.release.assert_awaited_once()
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_release_lock_handles_release_error(self, cache, caplog):
+        """락 해제 중 오류 발생 시 False를 반환하고 로그를 남긴다."""
+        mock_lock = AsyncMock()
+        mock_lock.release = AsyncMock(side_effect=Exception("Lock release error"))
+
+        with caplog.at_level("ERROR"):
+            result = await cache.release_lock(mock_lock)
+
+        assert result is False
+        assert "Failed to release lock" in caplog.text
+        assert "Lock release error" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_release_lock_can_be_called_multiple_times(self, cache):
+        """락을 여러 번 해제할 수 있다 (멱등성)."""
+        mock_lock = AsyncMock()
+        mock_lock.release = AsyncMock()
+
+        result1 = await cache.release_lock(mock_lock)
+        result2 = await cache.release_lock(mock_lock)
+        result3 = await cache.release_lock(mock_lock)
+
+        assert result1 is True
+        assert result2 is True
+        assert result3 is True
+        assert mock_lock.release.await_count == 3
+
+    @pytest.mark.asyncio
+    async def test_acquire_and_release_lock_workflow(self, cache):
+        """락 획득과 해제의 전체 워크플로우를 테스트한다."""
+        mock_client = AsyncMock()
+        mock_lock = AsyncMock()
+        mock_lock.acquire = AsyncMock(return_value=True)
+        mock_lock.release = AsyncMock()
+        mock_client.lock = MagicMock(return_value=mock_lock)
+        cache.redis_client = mock_client
+
+        # 락 획득
+        acquired_lock = await cache.acquire_lock("workflow_resource")
+        assert acquired_lock is mock_lock
+
+        # 락 해제
+        released = await cache.release_lock(acquired_lock)
+        assert released is True
+
+        mock_lock.acquire.assert_awaited_once()
+        mock_lock.release.assert_awaited_once()

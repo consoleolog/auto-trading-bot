@@ -42,6 +42,11 @@ async def main():
             "DB_NAME": "database.database",
             "DB_USER": "database.user",
             "DB_PASSWORD": "database.password",
+            # Redis Cache
+            "REDIS_HOST": "redis.host",
+            "REDIS_DB": "redis.database",
+            "REDIS_PORT": "redis.port",
+            "REDIS_PASSWORD": "redis.password",
         }
     )
 

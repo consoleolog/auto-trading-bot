@@ -22,3 +22,9 @@ database:
 
   min_connections: 5
   max_connections: 20
+
+redis:
+  host: ${REDIS_HOST}
+  database: ${REDIS_DB}
+  port: ${REDIS_PORT}
+  password: ${REDIS_PASSWORD}

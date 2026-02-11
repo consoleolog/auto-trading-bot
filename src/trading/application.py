@@ -3,14 +3,17 @@ import logging
 from signal import SIGINT, SIGTERM, Signals, signal
 from types import FrameType
 
+from src.config import ConfigManager
+
 logger = logging.getLogger(__name__)
 
 
 class TradingApplication:
-    def __init__(self, mode: str = "development"):
-        self.mode = mode
-        self.engine = None
+    def __init__(self, config: ConfigManager):
+        self.mode = config.get("app.mode") or "development"
         self.logger = logger
+
+        self.engine = None
 
         # shutdown 설정
         self.shutdown_event = asyncio.Event()

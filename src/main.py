@@ -16,31 +16,32 @@ logger = logging.getLogger(__name__)
 
 async def main():
     schema = ConfigSchema()
-    schema.require("trading_bot.mode", str)
-    schema.require("exchanges.executor_name", str)
+    schema.require("app.mode", str)
+    schema.require("trading.markets", list[str])
+    schema.require("trading.timeframes", list[str])
+    schema.require("exchange.name", str)
 
     config = ConfigManager(schema, watch_interval=2.0)
 
-    config.load_file("config/trading_bot.yaml", required=True)
-    config.load_file("config/database.yaml", required=True)
+    config.load_file("config/config.yaml", required=True)
 
-    if config.get("exchanges.executor_name") == "upbit":
-        executor_config = {
-            "UPBIT_API_KEY": "upbit.access_key",
-            "UPBIT_API_SECRET": "upbit.secret_key",
+    if config.get("exchange.executor_name") == "upbit":
+        exchange_config = {
+            "UPBIT_API_KEY": "upbit.api_key",
+            "UPBIT_API_SECRET": "upbit.api_secret",
         }
     else:
-        executor_config = {}
+        exchange_config = {}
 
     config.load_env(
         mapping={
-            **executor_config,
+            **exchange_config,
             # Timescale DB
-            "DB_HOST": "timescaledb.host",
-            "DB_PORT": "timescaledb.port",
-            "DB_NAME": "timescaledb.database",
-            "DB_USER": "timescaledb.user",
-            "DB_PASSWORD": "timescaledb.password",
+            "DB_HOST": "database.host",
+            "DB_PORT": "database.port",
+            "DB_NAME": "database.database",
+            "DB_USER": "database.user",
+            "DB_PASSWORD": "database.password",
         }
     )
 

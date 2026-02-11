@@ -1,4 +1,5 @@
 import signal
+from unittest.mock import Mock
 
 import pytest
 
@@ -6,11 +7,19 @@ from src.trading.application import TradingApplication
 
 
 @pytest.fixture
-def app():
+def mock_config():
+    """Mock ConfigManager"""
+    config = Mock()
+    config.get.return_value = "development"
+    return config
+
+
+@pytest.fixture
+def app(mock_config):
     """TradingApplication 인스턴스를 생성하고, 테스트 후 시그널 핸들러를 복원한다."""
     original_sigint = signal.getsignal(signal.SIGINT)
     original_sigterm = signal.getsignal(signal.SIGTERM)
-    application = TradingApplication()
+    application = TradingApplication(mock_config)
     yield application
     signal.signal(signal.SIGINT, original_sigint)
     signal.signal(signal.SIGTERM, original_sigterm)
@@ -73,22 +82,23 @@ class TestSignalHandler:
 
         assert "forcing immediate shutdown" in caplog.text
 
-    def test_signal_handlers_registered_on_init(self):
+    def test_signal_handlers_registered_on_init(self, mock_config):
         """TradingApplication 생성 시 SIGINT, SIGTERM 핸들러가 등록된다."""
         original_sigint = signal.getsignal(signal.SIGINT)
         original_sigterm = signal.getsignal(signal.SIGTERM)
 
         try:
-            app = TradingApplication()
+            app = TradingApplication(mock_config)
             assert signal.getsignal(signal.SIGINT) == app._signal_handler
             assert signal.getsignal(signal.SIGTERM) == app._signal_handler
         finally:
             signal.signal(signal.SIGINT, original_sigint)
             signal.signal(signal.SIGTERM, original_sigterm)
 
-    def test_default_mode_is_development(self, app: TradingApplication):
+    def test_default_mode_is_development(self, app: TradingApplication, mock_config):
         """기본 mode 가 development 이다."""
         assert app.mode == "development"
+        mock_config.get.assert_called_with("app.mode")
 
     def test_custom_mode(self):
         """사용자 지정 mode 가 올바르게 설정된다."""
@@ -96,8 +106,29 @@ class TestSignalHandler:
         original_sigterm = signal.getsignal(signal.SIGTERM)
 
         try:
-            app = TradingApplication(mode="production")
+            config = Mock()
+            config.get.return_value = "production"
+            app = TradingApplication(config)
             assert app.mode == "production"
+            config.get.assert_called_with("app.mode")
         finally:
             signal.signal(signal.SIGINT, original_sigint)
             signal.signal(signal.SIGTERM, original_sigterm)
+
+    def test_mode_defaults_to_development_when_config_returns_none(self):
+        """config가 None을 반환하면 mode가 development가 된다."""
+        original_sigint = signal.getsignal(signal.SIGINT)
+        original_sigterm = signal.getsignal(signal.SIGTERM)
+
+        try:
+            config = Mock()
+            config.get.return_value = None
+            app = TradingApplication(config)
+            assert app.mode == "development"
+        finally:
+            signal.signal(signal.SIGINT, original_sigint)
+            signal.signal(signal.SIGTERM, original_sigterm)
+
+    def test_engine_is_initialized_as_none(self, app: TradingApplication):
+        """engine이 None으로 초기화된다."""
+        assert app.engine is None

@@ -1,0 +1,24 @@
+app:
+  mode: development
+
+trading:
+  markets: [ "USDT-BTC", "USDT-ETH" ]
+  timeframes: [ "days", "minutes/60" ]
+
+exchange:
+  name: upbit # `upbit` or `bithumb`
+  mode: paper # paper or live or dry_run
+
+  upbit:
+    api_key: ${UPBIT_API_KEY}
+    api_secret: ${UPBIT_API_SECRET}
+
+database:
+  host: ${DB_HOST}
+  port: ${DB_PORT}
+  database: ${DB_NAME}
+  user: ${DB_USER}
+  password: ${DB_PASSWORD}
+
+  min_connections: 5
+  max_connections: 20

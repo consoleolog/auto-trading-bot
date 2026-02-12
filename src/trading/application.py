@@ -116,9 +116,14 @@ class TradingApplication:
         self._running = True
 
         try:
-            # TODO: Start main loop
-
             tasks = [asyncio.create_task(self._shutdown_monitor())]
+            for timeframe in self.timeframes:
+                for market in self.markets:
+                    task = asyncio.create_task(
+                        self._trading_cycle(market, timeframe), name=f"trading_{market}_{timeframe.value}"
+                    )
+                    tasks.append(task)
+                    self.logger.info(f"✅ Started trading task: {market}:{timeframe.value}")
 
             done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_EXCEPTION)
 
@@ -133,26 +138,26 @@ class TradingApplication:
         finally:
             await self.shutdown()
 
-    async def _trading_cycle(self):
-        for timeframe in self.timeframes:
-            for market in self.markets:
-                key = f"{market}:{timeframe.value}"
+    async def _trading_cycle(self, market: str, timeframe: Timeframe):
+        key = f"{market}:{timeframe.value}"
+        cooldown_seconds = self.cooldown_durations[timeframe].total_seconds()
 
-                try:
-                    # 1. Check cooldown if include in `self.market_cooldowns`
-                    if key in self.market_cooldowns:
-                        # 쿨타임 중이면 다음 마켓으로 넘김
-                        if datetime.now() < self.market_cooldowns[key]:
-                            remaining = (self.market_cooldowns[key] - datetime.now()).seconds
-                            if self.mode == "development":
-                                logger.debug(f"  {key}: Skipped - cooldown ({remaining}s remaining)")
-                            continue
-                        else:
-                            self.market_cooldowns[key] = datetime.now() + self.cooldown_durations[timeframe]
-                    else:
-                        self.market_cooldowns[key] = datetime.now() + self.cooldown_durations[timeframe]
-                except Exception as e:
-                    logger.error(f"Error in trading cycle: {e}")
+        while self._running:
+            try:
+                # Execute trading logic
+                self.logger.info(f"⚡ Executing: {key}")
+                # TODO: add main logic
+
+                # Sleep until next execution
+                self.logger.debug(f"💤 {key}: Sleeping for {cooldown_seconds}s")
+                await asyncio.sleep(cooldown_seconds)
+            except asyncio.CancelledError:
+                # Task was cancelled (likely due to config change or shutdown)
+                self.logger.info(f"🛑 Trading task cancelled: {key}")
+                break
+            except Exception as e:
+                self.logger.error(f"❌ Error in trading task {key}: {e}", exc_info=True)
+                await asyncio.sleep(min(60.0, cooldown_seconds))
 
     async def _shutdown_monitor(self):
         """Monitor for shutdown signal"""

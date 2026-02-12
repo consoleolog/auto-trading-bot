@@ -1,14 +1,49 @@
 -- Enable required extensions
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE EXTENSION IF NOT EXISTS "timescaledb";
 CREATE EXTENSION IF NOT EXISTS "pg_stat_statements";
 
 CREATE SCHEMA IF NOT EXISTS trading;
-CREATE SCHEMA IF NOT EXISTS analytics;
 
 -- =====================================================
 -- TRADING SCHEMA TABLES
 -- =====================================================
+
+-- Trades
+CREATE TABLE IF NOT EXISTS trading.trades
+(
+    id             UUID PRIMARY KEY     DEFAULT gen_random_uuid(),               -- 기본키
+    market         TEXT        NOT NULL,                                         -- 페어의 코드
+    timeframe      TEXT        NOT NULL,                                         -- 거래 중인 페어의 기간
+    side           TEXT        NOT NULL DEFAULT 'bid',                           -- 매수/매도 여부
+    status         TEXT        NOT NULL DEFAULT 'open',                          -- 현재 거래 상태
+    bid_order_uuid TEXT        NOT NULL,                                         -- 매수 주문 uuid
+    bid_price      NUMERIC     NOT NULL,                                         -- 매수 평단가
+    bid_volume     NUMERIC     NOT NULL,                                         -- 매수 수량
+    bid_amount     NUMERIC GENERATED ALWAYS AS (bid_price * bid_volume) STORED,  -- 총 매수금액 (자동계산)
+    bid_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),                           -- 매수 체결 시간
+    ask_order_uuid TEXT,                                                         -- 매도 주문 uuid
+    ask_price      NUMERIC,                                                      -- 매도 평단가
+    ask_volume     NUMERIC,                                                      -- 매도 수량
+    ask_amount     NUMERIC GENERATED ALWAYS AS ( ask_price * ask_volume) STORED, -- 총 매도금액
+    ask_at         TIMESTAMPTZ,                                                  -- 매도 체결 시간
+    pnl_krw        NUMERIC,                                                      -- KRW 로 환산한 손익
+    pnl_pct        NUMERIC,                                                      -- 손익 퍼센트(%)
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),                           -- 생성 시간
+    updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()                            -- 업데이트 시간
+);
+
+-- Strategies
+CREATE TABLE IF NOT EXISTS trading.strategy_signals
+(
+    market        TEXT        NOT NULL,               -- 페어의 코드
+    timeframe     TEXT        NOT NULL,               -- 거래 중인 페어의 기간
+    strategy_name TEXT        NOT NULL,               -- 전략명
+    status        TEXT        NOT NULL,               -- 전략 상태
+    metadata      JSONB       NOT NULL,               -- 세부 시그널 데이터
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(), -- 생성 시간
+    updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(), -- 업데이트 시간
+    CONSTRAINT strategy_signals_pk PRIMARY KEY (market, timeframe, strategy_name)
+);
 
 -- Candles
 CREATE TABLE IF NOT EXISTS trading.candles
@@ -97,21 +132,4 @@ CREATE TABLE IF NOT EXISTS trading.orders
     smp_type         TEXT,             -- 자전거래 체결 방지(Self-Match Prevention) 모드
     prevented_volume NUMERIC,          -- 자전거래 방지로 인해 취소된 수량. (동일 사용자의 주문 간 체결이 발생하지 않도록 설정(SMP)에 따라 취소된 주문 수량입니다.)
     prevented_locked NUMERIC           -- 자전거래 방지로 인해 해제된 자산. (자전거래 체결 방지 설정으로 인해 취소된 주문의 잔여 자산입니다.)
-);
-
--- =====================================================
--- ANALYTICS SCHEMA TABLES
--- =====================================================
-
--- Technical Signal
-CREATE TABLE IF NOT EXISTS analytics.technical_signals
-(
-    signal_name      TEXT        NOT NULL,
-    signal_type      TEXT        NOT NULL,
-    signal_value     TEXT        NOT NULL,
-    signal_strength  TEXT        NOT NULL,
-    signal_direction TEXT        NOT NULL,
-    created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    last_updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    PRIMARY KEY (signal_name, signal_type)
 );

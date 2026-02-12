@@ -1,8 +1,6 @@
 import importlib
 import logging
 
-from ..trading.exchanges.upbit.codes import OrderSide, OrderType, SelfMatchPreventionType, TimeInForce
-from ..trading.exchanges.upbit.codes.order_state import OrderState
 from ..trading.exchanges.upbit.models import Order
 
 try:
@@ -145,8 +143,8 @@ class DataStorage:
                 sql,
                 order.market,
                 order.uuid,
-                order.side.value,
-                order.ord_type.value,
+                order.side.value if order.side else None,
+                order.ord_type.value if order.ord_type else None,
                 order.price,
                 order.state.value,
                 order.created_at,
@@ -158,9 +156,9 @@ class DataStorage:
                 order.paid_fee,
                 order.locked,
                 order.trades_count,
-                order.time_in_force.value,
+                order.time_in_force.value if order.time_in_force else None,
                 order.identifier,
-                order.smp_type.value,
+                order.smp_type.value if order.smp_type else None,
                 order.prevented_volume,
                 order.prevented_locked,
             )
@@ -214,25 +212,4 @@ class DataStorage:
         if row is None:
             return None
 
-        return Order(
-            market=row["market"],
-            uuid=row["uuid"],
-            side=OrderSide(row["side"]),
-            ord_type=OrderType(row["ord_type"]),
-            price=row["price"],
-            state=OrderState(row["state"]),
-            created_at=row["created_at"],
-            volume=row["volume"],
-            remaining_volume=row["remaining_volume"],
-            executed_volume=row["executed_volume"],
-            reserved_fee=row["reserved_fee"],
-            remaining_fee=row["remaining_fee"],
-            paid_fee=row["paid_fee"],
-            locked=row["locked"],
-            trades_count=row["trades_count"],
-            time_in_force=TimeInForce(row.get("time_in_force", None)),
-            identifier=row["identifier"],
-            smp_type=SelfMatchPreventionType(row.get("smp_type", None)),
-            prevented_volume=row["prevented_volume"],
-            prevented_locked=row["prevented_locked"],
-        )
+        return Order.from_dict(row)

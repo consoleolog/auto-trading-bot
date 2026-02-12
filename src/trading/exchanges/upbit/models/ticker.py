@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 from ..codes import PriceChangeState
@@ -67,7 +67,7 @@ class Ticker:
 
     prev_closing_price: Decimal
 
-    change: PriceChangeState
+    change: PriceChangeState | None
     change_price: Decimal
     change_rate: Decimal
 
@@ -126,33 +126,36 @@ class Ticker:
             if isinstance(value, str):
                 setattr(self, field_name, datetime.strptime(value, fmt))
 
+        if isinstance(self.change, str):
+            self.change = PriceChangeState(self.change)
+
     @classmethod
-    def from_response(cls, response):
+    def from_dict(cls, data: dict):
         return cls(
-            market=response["market"],
-            trade_date=response["trade_date"],
-            trade_time=response["trade_time"],
-            trade_date_kst=response["trade_date_kst"],
-            trade_time_kst=response["trade_time_kst"],
-            trade_timestamp=response["trade_timestamp"],
-            opening_price=response["opening_price"],
-            high_price=response["high_price"],
-            low_price=response["low_price"],
-            trade_price=response["trade_price"],
-            prev_closing_price=response["prev_closing_price"],
-            change=PriceChangeState(response["change"]),
-            change_price=response["change_price"],
-            change_rate=response["change_rate"],
-            signed_change_price=response["signed_change_price"],
-            signed_change_rate=response["signed_change_rate"],
-            trade_volume=response["trade_volume"],
-            acc_trade_price=response["acc_trade_price"],
-            acc_trade_price_24h=response["acc_trade_price_24h"],
-            acc_trade_volume=response["acc_trade_volume"],
-            acc_trade_volume_24h=response["acc_trade_volume_24h"],
-            highest_52_week_price=response["highest_52_week_price"],
-            highest_52_week_date=response["highest_52_week_date"],
-            lowest_52_week_price=response["lowest_52_week_price"],
-            lowest_52_week_date=response["lowest_52_week_date"],
-            timestamp=response["timestamp"],
+            market=data.get("market", ""),
+            trade_date=data.get("trade_date", datetime.now(tz=timezone.utc)),
+            trade_time=data.get("trade_time", datetime.now(tz=timezone.utc)),
+            trade_date_kst=data.get("trade_date_kst", datetime.now(tz=timezone.utc) + timedelta(hours=9)),
+            trade_time_kst=data.get("trade_time_kst", datetime.now(tz=timezone.utc) + timedelta(hours=9)),
+            trade_timestamp=data.get("trade_timestamp", 0),
+            opening_price=data.get("opening_price", Decimal("0.0")),
+            high_price=data.get("high_price", Decimal("0.0")),
+            low_price=data.get("low_price", Decimal("0.0")),
+            trade_price=data.get("trade_price", Decimal("0.0")),
+            prev_closing_price=data.get("prev_closing_price", Decimal("0.0")),
+            change=data.get("change"),
+            change_price=data.get("change_price", Decimal("0.0")),
+            change_rate=data.get("change_rate", Decimal("0.0")),
+            signed_change_price=data.get("signed_change_price", Decimal("0.0")),
+            signed_change_rate=data.get("signed_change_rate", Decimal("0.0")),
+            trade_volume=data.get("trade_volume", Decimal("0.0")),
+            acc_trade_price=data.get("acc_trade_price", Decimal("0.0")),
+            acc_trade_price_24h=data.get("acc_trade_price_24h", Decimal("0.0")),
+            acc_trade_volume=data.get("acc_trade_volume", Decimal("0.0")),
+            acc_trade_volume_24h=data.get("acc_trade_volume_24h", Decimal("0.0")),
+            highest_52_week_price=data.get("highest_52_week_price", Decimal("0.0")),
+            highest_52_week_date=data.get("highest_52_week_date", datetime.now(tz=timezone.utc)),
+            lowest_52_week_price=data.get("lowest_52_week_price", Decimal("0.0")),
+            lowest_52_week_date=data.get("lowest_52_week_date", datetime.now(tz=timezone.utc)),
+            timestamp=data.get("timestamp", 0),
         )

@@ -31,9 +31,9 @@ def order():
         paid_fee=Decimal("0"),
         locked=Decimal("50025000"),
         trades_count=0,
-        time_in_force=TimeInForce.NONE,
+        time_in_force=TimeInForce.IOC,
         identifier="my-order-1",
-        smp_type=SelfMatchPreventionType.NONE,
+        smp_type=None,
         prevented_volume=Decimal("0"),
         prevented_locked=Decimal("0"),
     )
@@ -88,9 +88,9 @@ class TestPostInitDecimal:
             paid_fee="0",
             locked="50025000",
             trades_count=0,
-            time_in_force=TimeInForce.NONE,
+            time_in_force=TimeInForce.IOC,
             identifier="",
-            smp_type=SelfMatchPreventionType.NONE,
+            smp_type=None,
             prevented_volume="0",
             prevented_locked="0",
         )
@@ -118,9 +118,9 @@ class TestPostInitDecimal:
             paid_fee=0,
             locked=50025000,
             trades_count=0,
-            time_in_force=TimeInForce.NONE,
+            time_in_force=TimeInForce.IOC,
             identifier="",
-            smp_type=SelfMatchPreventionType.NONE,
+            smp_type=None,
             prevented_volume=0,
             prevented_locked=0,
         )
@@ -148,9 +148,9 @@ class TestPostInitDecimal:
             paid_fee=Decimal("0"),
             locked=Decimal("50025000"),
             trades_count=0,
-            time_in_force=TimeInForce.NONE,
+            time_in_force=TimeInForce.IOC,
             identifier="",
-            smp_type=SelfMatchPreventionType.NONE,
+            smp_type=None,
             prevented_volume=Decimal("0"),
             prevented_locked=Decimal("0"),
         )
@@ -205,9 +205,9 @@ class TestPostInitDatetime:
             paid_fee=Decimal("0"),
             locked=Decimal("50025000"),
             trades_count=0,
-            time_in_force=TimeInForce.NONE,
+            time_in_force=TimeInForce.IOC,
             identifier="",
-            smp_type=SelfMatchPreventionType.NONE,
+            smp_type=None,
             prevented_volume=Decimal("0"),
             prevented_locked=Decimal("0"),
         )
@@ -244,9 +244,9 @@ class TestPostInitDatetime:
             paid_fee=Decimal("0"),
             locked=Decimal("50025000"),
             trades_count=0,
-            time_in_force=TimeInForce.NONE,
+            time_in_force=TimeInForce.IOC,
             identifier="",
-            smp_type=SelfMatchPreventionType.NONE,
+            smp_type=None,
             prevented_volume=Decimal("0"),
             prevented_locked=Decimal("0"),
         )
@@ -254,50 +254,50 @@ class TestPostInitDatetime:
         assert order.created_at.utcoffset() == timedelta(hours=9)
 
 
-# ============= from_response =============
+# ============= from_dict =============
 
 
-class TestFromResponse:
-    def test_creates_order_from_response(self, api_response):
+class TestFromDict:
+    def test_creates_order_from_dict(self, api_response):
         """API 응답으로 Order를 생성한다."""
-        order = Order.from_response(api_response)
+        order = Order.from_dict(api_response)
 
         assert order.market == "KRW-BTC"
         assert order.uuid == "550e8400-e29b-41d4-a716-446655440000"
 
     def test_converts_side_to_enum(self, api_response):
         """side 문자열이 OrderSide enum으로 변환된다."""
-        order = Order.from_response(api_response)
+        order = Order.from_dict(api_response)
 
         assert order.side == OrderSide.BID
 
     def test_converts_ord_type_to_enum(self, api_response):
         """ord_type 문자열이 OrderType enum으로 변환된다."""
-        order = Order.from_response(api_response)
+        order = Order.from_dict(api_response)
 
         assert order.ord_type == OrderType.LIMIT
 
     def test_converts_state_to_enum(self, api_response):
         """state 문자열이 OrderState enum으로 변환된다."""
-        order = Order.from_response(api_response)
+        order = Order.from_dict(api_response)
 
         assert order.state == OrderState.WAIT
 
     def test_converts_time_in_force_to_enum(self, api_response):
         """time_in_force 문자열이 TimeInForce enum으로 변환된다."""
-        order = Order.from_response(api_response)
+        order = Order.from_dict(api_response)
 
         assert order.time_in_force == TimeInForce.IOC
 
     def test_converts_smp_type_to_enum(self, api_response):
         """smp_type 문자열이 SelfMatchPreventionType enum으로 변환된다."""
-        order = Order.from_response(api_response)
+        order = Order.from_dict(api_response)
 
         assert order.smp_type == SelfMatchPreventionType.CANCEL_MAKER
 
     def test_converts_created_at_to_datetime(self, api_response):
         """created_at 문자열이 datetime으로 변환된다."""
-        order = Order.from_response(api_response)
+        order = Order.from_dict(api_response)
 
         assert isinstance(order.created_at, datetime)
         assert order.created_at.year == 2025
@@ -305,7 +305,7 @@ class TestFromResponse:
 
     def test_converts_decimal_fields(self, api_response):
         """숫자 문자열 필드가 Decimal로 변환된다."""
-        order = Order.from_response(api_response)
+        order = Order.from_dict(api_response)
 
         assert isinstance(order.remaining_volume, Decimal)
         assert isinstance(order.reserved_fee, Decimal)
@@ -315,41 +315,41 @@ class TestFromResponse:
     def test_price_defaults_to_zero_when_missing(self, api_response):
         """price가 없으면 기본값 Decimal('0.0')이 사용된다."""
         del api_response["price"]
-        order = Order.from_response(api_response)
+        order = Order.from_dict(api_response)
 
         assert order.price == Decimal("0.0")
 
     def test_volume_defaults_to_zero_when_missing(self, api_response):
         """volume이 없으면 기본값 Decimal('0.0')이 사용된다."""
         del api_response["volume"]
-        order = Order.from_response(api_response)
+        order = Order.from_dict(api_response)
 
         assert order.volume == Decimal("0.0")
 
     def test_time_in_force_defaults_to_none_when_missing(self, api_response):
-        """time_in_force가 없으면 TimeInForce.NONE이 사용된다."""
+        """time_in_force가 없으면 None이 사용된다."""
         del api_response["time_in_force"]
-        order = Order.from_response(api_response)
+        order = Order.from_dict(api_response)
 
-        assert order.time_in_force == TimeInForce.NONE
+        assert order.time_in_force is None
 
     def test_identifier_defaults_to_empty_when_missing(self, api_response):
         """identifier가 없으면 빈 문자열이 사용된다."""
         del api_response["identifier"]
-        order = Order.from_response(api_response)
+        order = Order.from_dict(api_response)
 
         assert order.identifier == ""
 
     def test_smp_type_defaults_to_none_when_missing(self, api_response):
-        """smp_type이 없으면 SelfMatchPreventionType.NONE이 사용된다."""
+        """smp_type이 없으면 None이 사용된다."""
         del api_response["smp_type"]
-        order = Order.from_response(api_response)
+        order = Order.from_dict(api_response)
 
-        assert order.smp_type == SelfMatchPreventionType.NONE
+        assert order.smp_type is None
 
     def test_preserves_trades_count_as_int(self, api_response):
         """trades_count가 int로 유지된다."""
-        order = Order.from_response(api_response)
+        order = Order.from_dict(api_response)
 
         assert isinstance(order.trades_count, int)
         assert order.trades_count == 0

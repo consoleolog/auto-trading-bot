@@ -174,7 +174,7 @@ class TestDataStorage:
         from datetime import datetime
         from decimal import Decimal
 
-        from src.trading.exchanges.upbit.codes import OrderSide, OrderType, SelfMatchPreventionType, TimeInForce
+        from src.trading.exchanges.upbit.codes import OrderSide, OrderType, TimeInForce
         from src.trading.exchanges.upbit.codes.order_state import OrderState
         from src.trading.exchanges.upbit.models import Order
 
@@ -196,7 +196,7 @@ class TestDataStorage:
             trades_count=0,
             time_in_force=TimeInForce.IOC,
             identifier="test-identifier",
-            smp_type=SelfMatchPreventionType.NONE,
+            smp_type=None,
             prevented_volume=Decimal("0"),
             prevented_locked=Decimal("0"),
         )
@@ -226,7 +226,7 @@ class TestDataStorage:
         from datetime import datetime
         from decimal import Decimal
 
-        from src.trading.exchanges.upbit.codes import OrderSide, OrderType, SelfMatchPreventionType, TimeInForce
+        from src.trading.exchanges.upbit.codes import OrderSide, OrderType, TimeInForce
         from src.trading.exchanges.upbit.codes.order_state import OrderState
         from src.trading.exchanges.upbit.models import Order
 
@@ -248,7 +248,7 @@ class TestDataStorage:
             trades_count=1,
             time_in_force=TimeInForce.IOC,
             identifier="test-identifier",
-            smp_type=SelfMatchPreventionType.NONE,
+            smp_type=None,
             prevented_volume=Decimal("0"),
             prevented_locked=Decimal("0"),
         )
@@ -277,7 +277,7 @@ class TestDataStorage:
         from datetime import datetime
         from decimal import Decimal
 
-        from src.trading.exchanges.upbit.codes import OrderSide, OrderType, SelfMatchPreventionType, TimeInForce
+        from src.trading.exchanges.upbit.codes import OrderSide, OrderType, TimeInForce
         from src.trading.exchanges.upbit.codes.order_state import OrderState
         from src.trading.exchanges.upbit.models import Order
 
@@ -299,7 +299,7 @@ class TestDataStorage:
             trades_count=0,
             time_in_force=TimeInForce.IOC,
             identifier="test-identifier",
-            smp_type=SelfMatchPreventionType.NONE,
+            smp_type=None,
             prevented_volume=Decimal("0"),
             prevented_locked=Decimal("0"),
         )

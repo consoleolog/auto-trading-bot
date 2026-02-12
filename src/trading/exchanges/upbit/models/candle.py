@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 from ..codes import Unit
@@ -63,16 +63,16 @@ class Candle:
     candle_acc_trade_volume: Decimal
 
     # 분 봉일 때(MINUTE)
-    unit: Unit = Unit.NONE
+    unit: Unit | None
 
     # 일 봉일 때(DAY)
-    prev_closing_price: Decimal = Decimal("0.0")
-    change_price: Decimal = Decimal("0.0")
-    change_rate: Decimal = Decimal("0.0")
-    converted_trade_price: Decimal = Decimal("0.0")
+    prev_closing_price: Decimal
+    change_price: Decimal
+    change_rate: Decimal
+    converted_trade_price: Decimal
 
     # 주, 월, 년 봉일 때 (WEEK, MONTH, YEAR)
-    first_day_of_period: datetime | None = None
+    first_day_of_period: datetime
 
     def __post_init__(self):
         for field_name in [
@@ -90,6 +90,9 @@ class Candle:
             value = getattr(self, field_name)
             if isinstance(value, (int, float, str)):
                 setattr(self, field_name, Decimal(str(value)))
+
+        if isinstance(self.unit, int):
+            self.unit = Unit(self.unit)
 
     @property
     def body_size(self) -> Decimal:
@@ -114,22 +117,22 @@ class Candle:
         return self.trade_price < self.opening_price
 
     @classmethod
-    def from_response(cls, response: dict):
+    def from_dict(cls, data: dict):
         return cls(
-            market=response["market"],
-            candle_date_time_utc=response["candle_date_time_utc"],
-            candle_date_time_kst=response["candle_date_time_kst"],
-            opening_price=response["opening_price"],
-            high_price=response["high_price"],
-            low_price=response["low_price"],
-            trade_price=response["trade_price"],
-            timestamp=response["timestamp"],
-            candle_acc_trade_price=response["candle_acc_trade_price"],
-            candle_acc_trade_volume=response["candle_acc_trade_volume"],
-            unit=Unit(response.get("unit")),
-            prev_closing_price=response.get("prev_closing_price", Decimal("0.0")),
-            change_price=response.get("change_price", Decimal("0.0")),
-            change_rate=response.get("change_rate", Decimal("0.0")),
-            converted_trade_price=response.get("converted_trade_price", Decimal("0.0")),
-            first_day_of_period=response.get("first_day_of_period"),
+            market=data.get("market", ""),
+            candle_date_time_utc=data.get("candle_date_time_utc", datetime.now(timezone.utc)),
+            candle_date_time_kst=data.get("candle_date_time_kst", datetime.now(timezone.utc) + timedelta(hours=9)),
+            opening_price=data.get("opening_price", Decimal("0.0")),
+            high_price=data.get("high_price", Decimal("0.0")),
+            low_price=data.get("low_price", Decimal("0.0")),
+            trade_price=data.get("trade_price", Decimal("0.0")),
+            timestamp=data.get("timestamp", 0),
+            candle_acc_trade_price=data.get("candle_acc_trade_price", Decimal("0.0")),
+            candle_acc_trade_volume=data.get("candle_acc_trade_volume", Decimal("0.0")),
+            unit=data.get("unit"),
+            prev_closing_price=data.get("prev_closing_price", Decimal("0.0")),
+            change_price=data.get("change_price", Decimal("0.0")),
+            change_rate=data.get("change_rate", Decimal("0.0")),
+            converted_trade_price=data.get("converted_trade_price", Decimal("0.0")),
+            first_day_of_period=data.get("first_day_of_period", datetime.now(timezone.utc)),
         )

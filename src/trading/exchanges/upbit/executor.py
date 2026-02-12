@@ -132,7 +132,7 @@ class UpbitExecutor:
             params["to"] = to
         response = await self._request("GET", f"/candles/{timeframe.value}", params=params)
         # response 는 최신 -> 과거 데이터이기 때문에 슬라이싱으로 과거 -> 최신으로 정렬
-        candles = [Candle.from_response(r) for r in response[::-1]]
+        candles = [Candle.from_dict(r) for r in response[::-1]]
         return candles
 
     @rate_limit(calls=9)
@@ -147,7 +147,7 @@ class UpbitExecutor:
         """
         params = {"markets": ",".join(markets)}
         response = await self._request("GET", "/ticker", params=params)
-        tickers = [Ticker.from_response(r) for r in response]
+        tickers = [Ticker.from_dict(r) for r in response]
         return tickers
 
     async def get_ticker(self, market: str) -> Ticker:
@@ -195,7 +195,7 @@ class UpbitExecutor:
         endpoint = f"/orders{'/test' if self.test else ''}"
 
         response = await self._request("POST", endpoint, params, signed=True)
-        order = Order.from_response(response)
+        order = Order.from_dict(response)
         return order
 
     async def limit_order(

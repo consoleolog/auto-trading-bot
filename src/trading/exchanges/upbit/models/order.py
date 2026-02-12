@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 
 from ..codes import OrderSide, OrderState, OrderType, SelfMatchPreventionType, TimeInForce
@@ -40,14 +40,14 @@ class Order:
 
     market: str
     uuid: str
-    side: OrderSide
-    ord_type: OrderType
+    side: OrderSide | None
+    ord_type: OrderType | None
 
-    price: Decimal | None
+    price: Decimal
 
-    state: OrderState
+    state: OrderState | None
     created_at: datetime
-    volume: Decimal | None
+    volume: Decimal
     remaining_volume: Decimal
     executed_volume: Decimal
     reserved_fee: Decimal
@@ -56,9 +56,9 @@ class Order:
     locked: Decimal
     trades_count: int
 
-    time_in_force: TimeInForce
+    time_in_force: TimeInForce | None
     identifier: str
-    smp_type: SelfMatchPreventionType
+    smp_type: SelfMatchPreventionType | None
     prevented_volume: Decimal
     prevented_locked: Decimal
 
@@ -81,27 +81,42 @@ class Order:
         if isinstance(self.created_at, str):
             self.created_at = datetime.fromisoformat(self.created_at)
 
+        if isinstance(self.side, str):
+            self.side = OrderSide(self.side)
+
+        if isinstance(self.ord_type, str):
+            self.ord_type = OrderType(self.ord_type)
+
+        if isinstance(self.state, str):
+            self.state = OrderState(self.state)
+
+        if isinstance(self.time_in_force, str):
+            self.time_in_force = TimeInForce(self.time_in_force)
+
+        if isinstance(self.smp_type, str):
+            self.smp_type = SelfMatchPreventionType(self.smp_type)
+
     @classmethod
-    def from_response(cls, response: dict):
+    def from_dict(cls, data: dict):
         return cls(
-            market=response["market"],
-            uuid=response["uuid"],
-            side=OrderSide(response["side"]),
-            ord_type=OrderType(response["ord_type"]),
-            price=response.get("price", Decimal("0.0")),
-            state=OrderState(response["state"]),
-            created_at=response["created_at"],
-            volume=response.get("volume", Decimal("0.0")),
-            remaining_volume=response["remaining_volume"],
-            executed_volume=response["executed_volume"],
-            reserved_fee=response["reserved_fee"],
-            remaining_fee=response["remaining_fee"],
-            paid_fee=response["paid_fee"],
-            locked=response["locked"],
-            trades_count=response["trades_count"],
-            time_in_force=TimeInForce(response.get("time_in_force")),
-            identifier=response.get("identifier", ""),
-            smp_type=SelfMatchPreventionType(response.get("smp_type")),
-            prevented_volume=response["prevented_volume"],
-            prevented_locked=response["prevented_locked"],
+            market=data.get("market", ""),
+            uuid=data.get("uuid", ""),
+            side=data.get("side"),
+            ord_type=data.get("ord_type"),
+            price=data.get("price", Decimal("0.0")),
+            state=data.get("state"),
+            created_at=data.get("created_at", datetime.now(timezone.utc)),
+            volume=data.get("volume", Decimal("0.0")),
+            remaining_volume=data.get("remaining_volume", Decimal("0.0")),
+            executed_volume=data.get("executed_volume", Decimal("0.0")),
+            reserved_fee=data.get("reserved_fee", Decimal("0.0")),
+            remaining_fee=data.get("remaining_fee", Decimal("0.0")),
+            paid_fee=data.get("paid_fee", Decimal("0.0")),
+            locked=data.get("locked", Decimal("0.0")),
+            trades_count=data.get("trades_count", 0),
+            time_in_force=data.get("time_in_force"),
+            identifier=data.get("identifier", ""),
+            smp_type=data.get("smp_type"),
+            prevented_volume=data.get("prevented_volume", Decimal("0.0")),
+            prevented_locked=data.get("prevented_locked", Decimal("0.0")),
         )

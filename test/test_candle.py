@@ -21,6 +21,12 @@ def bullish_candle():
         timestamp=1735689600000,
         candle_acc_trade_price=Decimal("1000000000"),
         candle_acc_trade_volume=Decimal("20.5"),
+        unit=None,
+        prev_closing_price=Decimal("0.0"),
+        change_price=Decimal("0.0"),
+        change_rate=Decimal("0.0"),
+        converted_trade_price=Decimal("0.0"),
+        first_day_of_period=datetime(2025, 1, 1, 0, 0, 0),
     )
 
 
@@ -38,6 +44,12 @@ def bearish_candle():
         timestamp=1735689600000,
         candle_acc_trade_price=Decimal("1000000000"),
         candle_acc_trade_volume=Decimal("20.5"),
+        unit=None,
+        prev_closing_price=Decimal("0.0"),
+        change_price=Decimal("0.0"),
+        change_rate=Decimal("0.0"),
+        converted_trade_price=Decimal("0.0"),
+        first_day_of_period=datetime(2025, 1, 1, 0, 0, 0),
     )
 
 
@@ -55,6 +67,12 @@ def doji_candle():
         timestamp=1735689600000,
         candle_acc_trade_price=Decimal("500000000"),
         candle_acc_trade_volume=Decimal("10.0"),
+        unit=None,
+        prev_closing_price=Decimal("0.0"),
+        change_price=Decimal("0.0"),
+        change_rate=Decimal("0.0"),
+        converted_trade_price=Decimal("0.0"),
+        first_day_of_period=datetime(2025, 1, 1, 0, 0, 0),
     )
 
 
@@ -109,6 +127,12 @@ class TestPostInit:
             timestamp=1735689600000,
             candle_acc_trade_price=1000000,
             candle_acc_trade_volume=20,
+            unit=None,
+            prev_closing_price=Decimal("0.0"),
+            change_price=Decimal("0.0"),
+            change_rate=Decimal("0.0"),
+            converted_trade_price=Decimal("0.0"),
+            first_day_of_period=datetime(2025, 1, 1),
         )
 
         assert isinstance(candle.opening_price, Decimal)
@@ -129,6 +153,12 @@ class TestPostInit:
             timestamp=1735689600000,
             candle_acc_trade_price=1000000.0,
             candle_acc_trade_volume=20.5,
+            unit=None,
+            prev_closing_price=Decimal("0.0"),
+            change_price=Decimal("0.0"),
+            change_rate=Decimal("0.0"),
+            converted_trade_price=Decimal("0.0"),
+            first_day_of_period=datetime(2025, 1, 1),
         )
 
         assert isinstance(candle.opening_price, Decimal)
@@ -147,6 +177,12 @@ class TestPostInit:
             timestamp=1735689600000,
             candle_acc_trade_price="1000000",
             candle_acc_trade_volume="20",
+            unit=None,
+            prev_closing_price=Decimal("0.0"),
+            change_price=Decimal("0.0"),
+            change_rate=Decimal("0.0"),
+            converted_trade_price=Decimal("0.0"),
+            first_day_of_period=datetime(2025, 1, 1),
         )
 
         assert isinstance(candle.opening_price, Decimal)
@@ -170,9 +206,12 @@ class TestPostInit:
             timestamp=1735689600000,
             candle_acc_trade_price=Decimal("1000000"),
             candle_acc_trade_volume=Decimal("20"),
+            unit=None,
             prev_closing_price=49000,
             change_price=1500,
             change_rate=0.03,
+            converted_trade_price=Decimal("0.0"),
+            first_day_of_period=datetime(2025, 1, 1),
         )
 
         assert isinstance(candle.prev_closing_price, Decimal)
@@ -240,25 +279,25 @@ class TestBullishBearish:
 
 class TestDefaultValues:
     def test_unit_defaults_to_none(self, bullish_candle):
-        """unit 기본값은 Unit.NONE 이다."""
-        assert bullish_candle.unit == Unit.NONE
+        """unit 기본값은 None 이다."""
+        assert bullish_candle.unit is None
 
     def test_prev_closing_price_defaults_to_zero(self, bullish_candle):
         """prev_closing_price 기본값은 0.0 이다."""
         assert bullish_candle.prev_closing_price == Decimal("0.0")
 
-    def test_first_day_of_period_defaults_to_none(self, bullish_candle):
-        """first_day_of_period 기본값은 None 이다."""
-        assert bullish_candle.first_day_of_period is None
+    def test_first_day_of_period_has_value(self, bullish_candle):
+        """first_day_of_period 가 설정되어 있다."""
+        assert bullish_candle.first_day_of_period is not None
 
 
-# ============= from_response =============
+# ============= from_dict =============
 
 
-class TestFromResponse:
+class TestFromDict:
     def test_creates_candle_from_minute_response(self, api_response):
         """분봉 API 응답으로 Candle 을 생성한다."""
-        candle = Candle.from_response(api_response)
+        candle = Candle.from_dict(api_response)
 
         assert candle.market == "KRW-ETH"
         assert candle.opening_price == Decimal("5000000")
@@ -269,7 +308,7 @@ class TestFromResponse:
 
     def test_creates_candle_from_daily_response(self, daily_api_response):
         """일봉 API 응답으로 Candle 을 생성한다."""
-        candle = Candle.from_response(daily_api_response)
+        candle = Candle.from_dict(daily_api_response)
 
         assert candle.prev_closing_price == Decimal("4980000")
         assert candle.change_price == Decimal("70000")
@@ -278,15 +317,15 @@ class TestFromResponse:
 
     def test_missing_optional_fields_use_defaults(self, api_response):
         """응답에 선택 필드가 없으면 기본값을 사용한다."""
-        candle = Candle.from_response(api_response)
+        candle = Candle.from_dict(api_response)
 
         assert candle.prev_closing_price == Decimal("0.0")
         assert candle.change_price == Decimal("0.0")
-        assert candle.first_day_of_period is None
+        assert isinstance(candle.first_day_of_period, datetime)
 
     def test_converts_numeric_response_to_decimal(self, api_response):
         """API 응답의 숫자 값이 Decimal 로 변환된다."""
-        candle = Candle.from_response(api_response)
+        candle = Candle.from_dict(api_response)
 
         assert isinstance(candle.opening_price, Decimal)
         assert isinstance(candle.candle_acc_trade_price, Decimal)
@@ -294,22 +333,22 @@ class TestFromResponse:
 
     def test_preserves_datetime_fields(self, api_response):
         """datetime 필드가 그대로 유지된다."""
-        candle = Candle.from_response(api_response)
+        candle = Candle.from_dict(api_response)
 
         assert candle.candle_date_time_utc == datetime(2025, 6, 15, 12, 0, 0)
         assert candle.candle_date_time_kst == datetime(2025, 6, 15, 21, 0, 0)
 
     def test_unit_none_when_not_in_response(self, daily_api_response):
-        """응답에 unit 이 없으면 Unit.NONE 으로 설정된다."""
-        candle = Candle.from_response(daily_api_response)
+        """응답에 unit 이 없으면 None 으로 설정된다."""
+        candle = Candle.from_dict(daily_api_response)
 
-        assert candle.unit == Unit.NONE
+        assert candle.unit is None
 
     def test_weekly_response_with_first_day_of_period(self, api_response):
         """주봉 응답의 first_day_of_period 가 설정된다."""
         api_response.pop("unit")
         api_response["first_day_of_period"] = datetime(2025, 6, 9)
 
-        candle = Candle.from_response(api_response)
+        candle = Candle.from_dict(api_response)
 
         assert candle.first_day_of_period == datetime(2025, 6, 9)

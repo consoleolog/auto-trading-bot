@@ -11,7 +11,6 @@ class SelfMatchPreventionType(Enum):
         REDUCE: 기존 주문과 신규 주문의 주문 수량을 줄여 체결을 방지합니다. 잔량이 0인 경우 주문을 취소합니다.
     """
 
-    NONE = None
     CANCEL_MAKER = "cancel_maker"
     CANCEL_TAKER = "cancel_taker"
     REDUCE = "reduce"

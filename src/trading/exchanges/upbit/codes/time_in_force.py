@@ -16,7 +16,6 @@ class TimeInForce(Enum):
                     주문이 생성되며 테이커(taker) 주문으로 체결되는 것을 방지합니다.
     """
 
-    NONE = None
     IOC = "ioc"
     FOK = "fok"
     POST_ONLY = "post_only"

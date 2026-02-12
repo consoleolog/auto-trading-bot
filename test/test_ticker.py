@@ -367,15 +367,13 @@ class TestPostInitDatetime:
         assert ticker.lowest_52_week_date == datetime(2024, 9, 10)
 
 
-# ============= from_response =============
+# ============= from_dict =============
 
 
-class TestFromResponse:
-    def test_creates_ticker_from_response(self, api_response):
+class TestFromDict:
+    def test_creates_ticker_from_dict(self, api_response):
         """API 응답으로 Ticker를 생성한다."""
-        # from_response에 "response" 키 버그가 있어 우회
-        api_response["response"] = api_response["change_rate"]
-        ticker = Ticker.from_response(api_response)
+        ticker = Ticker.from_dict(api_response)
 
         assert ticker.market == "KRW-BTC"
         assert ticker.opening_price == Decimal("50000000")
@@ -383,15 +381,13 @@ class TestFromResponse:
 
     def test_converts_change_to_enum(self, api_response):
         """change 문자열이 PriceChangeState enum으로 변환된다."""
-        api_response["response"] = api_response["change_rate"]
-        ticker = Ticker.from_response(api_response)
+        ticker = Ticker.from_dict(api_response)
 
         assert ticker.change == PriceChangeState.RISE
 
     def test_converts_numeric_fields_to_decimal(self, api_response):
         """API 응답의 숫자 값이 Decimal로 변환된다."""
-        api_response["response"] = api_response["change_rate"]
-        ticker = Ticker.from_response(api_response)
+        ticker = Ticker.from_dict(api_response)
 
         assert isinstance(ticker.opening_price, Decimal)
         assert isinstance(ticker.change_price, Decimal)
@@ -399,8 +395,7 @@ class TestFromResponse:
 
     def test_converts_date_strings_to_datetime(self, api_response):
         """API 응답의 날짜 문자열이 datetime으로 변환된다."""
-        api_response["response"] = api_response["change_rate"]
-        ticker = Ticker.from_response(api_response)
+        ticker = Ticker.from_dict(api_response)
 
         assert isinstance(ticker.trade_date, datetime)
         assert ticker.trade_date == datetime(2025, 6, 24)
@@ -417,8 +412,7 @@ class TestFromResponse:
 
     def test_preserves_timestamp_as_int(self, api_response):
         """timestamp 필드가 int로 유지된다."""
-        api_response["response"] = api_response["change_rate"]
-        ticker = Ticker.from_response(api_response)
+        ticker = Ticker.from_dict(api_response)
 
         assert isinstance(ticker.timestamp, int)
         assert ticker.timestamp == 1719244245000

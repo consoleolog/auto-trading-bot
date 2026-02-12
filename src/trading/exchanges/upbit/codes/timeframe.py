@@ -8,7 +8,6 @@ class Unit(Enum):
     최대 240분(4시간) 캔들까지 조회할 수 있습니다.
     """
 
-    NONE = None
     MINUTE_1 = 1
     MINUTE_3 = 3
     MINUTE_5 = 5

@@ -11,7 +11,7 @@ from src.utils import rate_limit, retry_async
 
 from .codes import OrderSide, OrderType, SelfMatchPreventionType, Timeframe, TimeInForce
 from .errors import error_handler
-from .models import Candle, Order, Ticker
+from .models import Account, Candle, Order, Ticker
 
 try:
     aiohttp = importlib.import_module("aiohttp")
@@ -273,3 +273,33 @@ class UpbitExecutor:
             smp_type=smp_type,
             identifier=identifier,
         )
+
+    # ========================================================================
+    # ACCOUNT OPERATIONS
+    # ========================================================================
+
+    @rate_limit(calls=25)
+    @retry_async(max_retries=3)
+    async def get_accounts(self) -> list[Account]:
+        """계정이 보유하고 있는 자산 목록과 잔고를 조회합니다"""
+        try:
+            response = await self._request("GET", "/accounts", signed=True)
+            return [Account.from_dict(r) for r in response]
+        except Exception as exception:
+            logger.error(f"get_accounts() 실행 중 오류 발생: {exception}")
+            return []
+
+    async def get_account(self, currency: str) -> Account | None:
+        accounts = await self.get_accounts()
+        for account in accounts:
+            if account.currency == currency:
+                return account
+        return None
+
+    async def get_krw(self) -> Account | None:
+        """보유 원화(KRW) 조회"""
+        return await self.get_account("KRW")
+
+    async def get_usdt(self) -> Account | None:
+        """보유 USDT 조회"""
+        return await self.get_account("USDT")

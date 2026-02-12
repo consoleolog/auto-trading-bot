@@ -1098,3 +1098,230 @@ class TestBestOrder:
         assert call_kwargs[1]["volume"] == Decimal("0.001")
         assert call_kwargs[1]["smp_type"] == SelfMatchPreventionType.CANCEL_TAKER
         assert call_kwargs[1]["identifier"] == "best-1"
+
+
+# ============= get_accounts =============
+
+SAMPLE_ACCOUNT_RESPONSE = {
+    "currency": "KRW",
+    "balance": "1000000",
+    "locked": "0",
+    "avg_buy_price": "0",
+    "avg_buy_price_modified": False,
+    "unit_currency": "KRW",
+}
+
+
+class TestGetAccounts:
+    @pytest.mark.asyncio
+    async def test_returns_account_list(self, executor: UpbitExecutor):
+        """응답 데이터를 Account 객체 리스트로 변환하여 반환한다."""
+        with patch.object(executor, "_request", new_callable=AsyncMock) as mock_req:
+            mock_req.return_value = [SAMPLE_ACCOUNT_RESPONSE.copy()]
+
+            result = await executor.get_accounts()
+
+        assert len(result) == 1
+        assert result[0].currency == "KRW"
+        assert result[0].balance == Decimal("1000000")
+
+    @pytest.mark.asyncio
+    async def test_uses_get_method(self, executor: UpbitExecutor):
+        """GET 메서드로 요청한다."""
+        with patch.object(executor, "_request", new_callable=AsyncMock) as mock_req:
+            mock_req.return_value = []
+
+            await executor.get_accounts()
+
+        assert mock_req.call_args[0][0] == "GET"
+
+    @pytest.mark.asyncio
+    async def test_calls_accounts_endpoint(self, executor: UpbitExecutor):
+        """/accounts 엔드포인트로 요청한다."""
+        with patch.object(executor, "_request", new_callable=AsyncMock) as mock_req:
+            mock_req.return_value = []
+
+            await executor.get_accounts()
+
+        assert mock_req.call_args[0][1] == "/accounts"
+
+    @pytest.mark.asyncio
+    async def test_signed_request(self, executor: UpbitExecutor):
+        """signed=True로 요청한다."""
+        with patch.object(executor, "_request", new_callable=AsyncMock) as mock_req:
+            mock_req.return_value = []
+
+            await executor.get_accounts()
+
+        assert mock_req.call_args[1]["signed"] is True
+
+    @pytest.mark.asyncio
+    async def test_multiple_accounts(self, executor: UpbitExecutor):
+        """여러 개의 계정 응답을 모두 Account 객체로 변환한다."""
+        krw_account = SAMPLE_ACCOUNT_RESPONSE.copy()
+        krw_account["currency"] = "KRW"
+        krw_account["balance"] = "1000000"
+
+        btc_account = SAMPLE_ACCOUNT_RESPONSE.copy()
+        btc_account["currency"] = "BTC"
+        btc_account["balance"] = "0.5"
+        btc_account["avg_buy_price"] = "50000000"
+        btc_account["unit_currency"] = "KRW"
+
+        with patch.object(executor, "_request", new_callable=AsyncMock) as mock_req:
+            mock_req.return_value = [krw_account, btc_account]
+
+            result = await executor.get_accounts()
+
+        assert len(result) == 2
+        assert result[0].currency == "KRW"
+        assert result[0].balance == Decimal("1000000")
+        assert result[1].currency == "BTC"
+        assert result[1].balance == Decimal("0.5")
+        assert result[1].avg_buy_price == Decimal("50000000")
+
+    @pytest.mark.asyncio
+    async def test_returns_empty_list_on_exception(self, executor: UpbitExecutor, caplog):
+        """예외 발생 시 에러 로그를 남기고 빈 리스트를 반환한다."""
+        with (
+            patch.object(executor, "_request", new_callable=AsyncMock) as mock_req,
+            caplog.at_level("ERROR"),
+        ):
+            mock_req.side_effect = Exception("API error")
+
+            result = await executor.get_accounts()
+
+        assert result == []
+        assert "get_accounts() 실행 중 오류 발생" in caplog.text
+
+
+# ============= get_account =============
+
+
+class TestGetAccount:
+    @pytest.mark.asyncio
+    async def test_returns_matching_account(self, executor: UpbitExecutor):
+        """지정한 currency와 일치하는 Account를 반환한다."""
+        krw_account = SAMPLE_ACCOUNT_RESPONSE.copy()
+        krw_account["currency"] = "KRW"
+
+        btc_account = SAMPLE_ACCOUNT_RESPONSE.copy()
+        btc_account["currency"] = "BTC"
+
+        with patch.object(executor, "get_accounts", new_callable=AsyncMock) as mock_get_accounts:
+            from src.trading.exchanges.upbit.models import Account
+
+            mock_get_accounts.return_value = [
+                Account.from_dict(krw_account),
+                Account.from_dict(btc_account),
+            ]
+
+            result = await executor.get_account("BTC")
+
+        assert result is not None
+        assert result.currency == "BTC"
+
+    @pytest.mark.asyncio
+    async def test_returns_none_when_not_found(self, executor: UpbitExecutor):
+        """일치하는 currency가 없으면 None을 반환한다."""
+        krw_account = SAMPLE_ACCOUNT_RESPONSE.copy()
+        krw_account["currency"] = "KRW"
+
+        with patch.object(executor, "get_accounts", new_callable=AsyncMock) as mock_get_accounts:
+            from src.trading.exchanges.upbit.models import Account
+
+            mock_get_accounts.return_value = [Account.from_dict(krw_account)]
+
+            result = await executor.get_account("ETH")
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_delegates_to_get_accounts(self, executor: UpbitExecutor):
+        """get_accounts를 호출하여 계정 목록을 가져온다."""
+        with patch.object(executor, "get_accounts", new_callable=AsyncMock) as mock_get_accounts:
+            mock_get_accounts.return_value = []
+
+            await executor.get_account("BTC")
+
+        mock_get_accounts.assert_awaited_once()
+
+
+# ============= get_krw =============
+
+
+class TestGetKrw:
+    @pytest.mark.asyncio
+    async def test_calls_get_account_with_krw(self, executor: UpbitExecutor):
+        """get_account('KRW')를 호출한다."""
+        with patch.object(executor, "get_account", new_callable=AsyncMock) as mock_get_account:
+            mock_get_account.return_value = MagicMock()
+
+            await executor.get_krw()
+
+        mock_get_account.assert_awaited_once_with("KRW")
+
+    @pytest.mark.asyncio
+    async def test_returns_krw_account(self, executor: UpbitExecutor):
+        """KRW 계정을 반환한다."""
+        from src.trading.exchanges.upbit.models import Account
+
+        krw_account = Account.from_dict(SAMPLE_ACCOUNT_RESPONSE.copy())
+
+        with patch.object(executor, "get_account", new_callable=AsyncMock) as mock_get_account:
+            mock_get_account.return_value = krw_account
+
+            result = await executor.get_krw()
+
+        assert result is krw_account
+
+    @pytest.mark.asyncio
+    async def test_returns_none_when_krw_not_found(self, executor: UpbitExecutor):
+        """KRW 계정이 없으면 None을 반환한다."""
+        with patch.object(executor, "get_account", new_callable=AsyncMock) as mock_get_account:
+            mock_get_account.return_value = None
+
+            result = await executor.get_krw()
+
+        assert result is None
+
+
+# ============= get_usdt =============
+
+
+class TestGetUsdt:
+    @pytest.mark.asyncio
+    async def test_calls_get_account_with_usdt(self, executor: UpbitExecutor):
+        """get_account('USDT')를 호출한다."""
+        with patch.object(executor, "get_account", new_callable=AsyncMock) as mock_get_account:
+            mock_get_account.return_value = MagicMock()
+
+            await executor.get_usdt()
+
+        mock_get_account.assert_awaited_once_with("USDT")
+
+    @pytest.mark.asyncio
+    async def test_returns_usdt_account(self, executor: UpbitExecutor):
+        """USDT 계정을 반환한다."""
+        from src.trading.exchanges.upbit.models import Account
+
+        usdt_account_data = SAMPLE_ACCOUNT_RESPONSE.copy()
+        usdt_account_data["currency"] = "USDT"
+        usdt_account = Account.from_dict(usdt_account_data)
+
+        with patch.object(executor, "get_account", new_callable=AsyncMock) as mock_get_account:
+            mock_get_account.return_value = usdt_account
+
+            result = await executor.get_usdt()
+
+        assert result is usdt_account
+
+    @pytest.mark.asyncio
+    async def test_returns_none_when_usdt_not_found(self, executor: UpbitExecutor):
+        """USDT 계정이 없으면 None을 반환한다."""
+        with patch.object(executor, "get_account", new_callable=AsyncMock) as mock_get_account:
+            mock_get_account.return_value = None
+
+            result = await executor.get_usdt()
+
+        assert result is None

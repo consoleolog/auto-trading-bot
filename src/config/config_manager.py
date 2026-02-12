@@ -132,15 +132,8 @@ class ConfigManager:
             if value is None:
                 return default
 
-            # Unwrap ConfigValue if it's a leaf value
-            if isinstance(value, ConfigValue):
-                return value.value
-
-            # If it's a dict, recursively unwrap all ConfigValues
-            if isinstance(value, dict):
-                return self._unwrap_values(value)
-
-            return value
+            # Always unwrap ConfigValue objects recursively
+            return self._unwrap_values(value)
 
     def get_all(self) -> dict[str, Any]:
         """Get a copy of the entire configuration with unwrapped values"""

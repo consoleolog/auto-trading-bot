@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 sys.path.insert(0, os.getcwd())
 
 from src.config import ConfigManager, ConfigSchema
+from src.trading.application import TradingApplication
 
 load_dotenv()
 
@@ -17,18 +18,18 @@ logger = logging.getLogger(__name__)
 async def main():
     schema = ConfigSchema()
     schema.require("app.mode", str)
-    schema.require("trading.markets", list[str])
-    schema.require("trading.timeframes", list[str])
+    schema.require("trading.markets", list)
+    schema.require("trading.timeframes", list)
     schema.require("exchange.name", str)
 
     config = ConfigManager(schema, watch_interval=2.0)
 
     config.load_file("config/config.yaml", required=True)
 
-    if config.get("exchange.executor_name") == "upbit":
+    if config.get("exchange.name") == "upbit":
         exchange_config = {
-            "UPBIT_API_KEY": "upbit.api_key",
-            "UPBIT_API_SECRET": "upbit.api_secret",
+            "UPBIT_API_KEY": "exchange.upbit.api_key",
+            "UPBIT_API_SECRET": "exchange.upbit.api_secret",
         }
     else:
         exchange_config = {}
@@ -57,7 +58,15 @@ async def main():
         logger.error(f"Configuration validation failed: {exception}")
         raise
 
-    # TODO: run application
+    app = TradingApplication(config)
+
+    try:
+        await app.start()
+    except KeyboardInterrupt:
+        print("\n👋 Goodbye!")
+    except Exception as e:
+        print(f"❌ Fatal error: {e}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

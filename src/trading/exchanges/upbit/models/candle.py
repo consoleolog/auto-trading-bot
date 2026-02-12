@@ -136,3 +136,23 @@ class Candle:
             converted_trade_price=data.get("converted_trade_price", Decimal("0.0")),
             first_day_of_period=data.get("first_day_of_period", datetime.now(timezone.utc)),
         )
+
+    def to_dict(self) -> dict:
+        return {
+            "market": self.market,
+            "candle_date_time_utc": self.candle_date_time_utc,
+            "candle_date_time_kst": self.candle_date_time_kst,
+            "opening_price": self.opening_price,
+            "high_price": self.high_price,
+            "low_price": self.low_price,
+            "trade_price": self.trade_price,
+            "timestamp": self.timestamp,
+            "candle_acc_trade_price": self.candle_acc_trade_price,
+            "candle_acc_trade_volume": self.candle_acc_trade_volume,
+            "unit": self.unit,
+            "prev_closing_price": self.prev_closing_price,
+            "change_price": self.change_price,
+            "change_rate": self.change_rate,
+            "converted_trade_price": self.converted_trade_price,
+            "first_day_of_period": self.first_day_of_period,
+        }

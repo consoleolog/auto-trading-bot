@@ -159,3 +159,33 @@ class Ticker:
             lowest_52_week_date=data.get("lowest_52_week_date", datetime.now(tz=timezone.utc)),
             timestamp=data.get("timestamp", 0),
         )
+
+    def to_dict(self):
+        return {
+            "market": self.market,
+            "trade_date": self.trade_date,
+            "trade_time": self.trade_time,
+            "trade_date_kst": self.trade_date_kst,
+            "trade_time_kst": self.trade_time_kst,
+            "trade_timestamp": self.trade_timestamp,
+            "opening_price": self.opening_price,
+            "high_price": self.high_price,
+            "low_price": self.low_price,
+            "trade_price": self.trade_price,
+            "prev_closing_price": self.prev_closing_price,
+            "change": self.change,
+            "change_price": self.change_price,
+            "change_rate": self.change_rate,
+            "signed_change_price": self.signed_change_price,
+            "signed_change_rate": self.signed_change_rate,
+            "trade_volume": self.trade_volume,
+            "acc_trade_price": self.acc_trade_price,
+            "acc_trade_price_24h": self.acc_trade_price_24h,
+            "acc_trade_volume": self.acc_trade_volume,
+            "acc_trade_volume_24h": self.acc_trade_volume_24h,
+            "highest_52_week_price": self.highest_52_week_price,
+            "highest_52_week_date": self.highest_52_week_date,
+            "lowest_52_week_price": self.lowest_52_week_price,
+            "lowest_52_week_date": self.lowest_52_week_date,
+            "timestamp": self.timestamp,
+        }

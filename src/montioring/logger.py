@@ -56,3 +56,27 @@ class StructuredLogger:
             console_handler.setFormatter(self._get_formatter(output_type="console"))
             console_handler.addFilter(IgnorePortScannersFilter())
             logger.addHandler(console_handler)
+
+        # File handler
+        if "file" in self.config.get("outputs"):
+            from logging.handlers import RotatingFileHandler
+
+            file_handler = RotatingFileHandler(
+                log_dir / f"{self.name}.log",
+                maxBytes=self.config.get("max_file_size"),
+                backupCount=self.config.get("backup_count"),
+            )
+            file_handler.setFormatter(self._get_formatter(output_type="file"))
+            logger.addHandler(file_handler)
+
+            # 에러 로그는 따로 관리
+            if self.config.get("error_tracking"):
+                error_handler = RotatingFileHandler(
+                    log_dir / f"{self.name}_errors.log",
+                    maxBytes=self.config.get("max_file_size"),
+                    backupCount=self.config.get("backup_count"),
+                )
+                error_handler.setLevel(logging.ERROR)
+                error_handler.setFormatter(self._get_formatter("file"))
+                error_handler.addFilter(IgnorePortScannersFilter())
+                logger.addHandler(error_handler)

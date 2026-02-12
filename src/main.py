@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 sys.path.insert(0, os.getcwd())
 
 from src.config import ConfigManager, ConfigSchema
+from src.montioring import setup_logger
 from src.trading.application import TradingApplication
 
 load_dotenv()
@@ -18,6 +19,7 @@ logger = logging.getLogger(__name__)
 async def main():
     schema = ConfigSchema()
     schema.require("app.mode", str)
+    schema.require("logging", dict)
     schema.require("trading.markets", list)
     schema.require("trading.timeframes", list)
     schema.require("exchange.name", str)
@@ -58,6 +60,7 @@ async def main():
         logger.error(f"Configuration validation failed: {exception}")
         raise
 
+    setup_logger(config=config)
     app = TradingApplication(config)
 
     try:

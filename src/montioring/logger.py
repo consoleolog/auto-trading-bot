@@ -6,6 +6,9 @@ from ..config import ConfigManager
 from .formatters import ColoredFormatter, JsonFormatter, StandardFormatter
 from .ignore_filter import IgnorePortScannersFilter
 
+# 전역 로거 인스턴스 (싱글톤 패턴)
+_logger_instance: "StructuredLogger | None" = None
+
 
 class StructuredLogger:
     def __init__(self, name: str = "TradingBot", config: ConfigManager | None = None):
@@ -63,7 +66,7 @@ class StructuredLogger:
 
             file_handler = RotatingFileHandler(
                 log_dir / f"{self.name}.log",
-                maxBytes=self.config.get("max_file_size"),
+                maxBytes=int(self.config.get("max_file_size")),
                 backupCount=self.config.get("backup_count"),
             )
             file_handler.setFormatter(self._get_formatter(output_type="file"))
@@ -73,10 +76,46 @@ class StructuredLogger:
             if self.config.get("error_tracking"):
                 error_handler = RotatingFileHandler(
                     log_dir / f"{self.name}_errors.log",
-                    maxBytes=self.config.get("max_file_size"),
+                    maxBytes=int(self.config.get("max_file_size")),
                     backupCount=self.config.get("backup_count"),
                 )
                 error_handler.setLevel(logging.ERROR)
                 error_handler.setFormatter(self._get_formatter("file"))
                 error_handler.addFilter(IgnorePortScannersFilter())
                 logger.addHandler(error_handler)
+
+
+def setup_logger(name: str = "TradingBot", config: ConfigManager | None = None) -> StructuredLogger:
+    """
+    전역 로거를 설정합니다. 애플리케이션 시작 시 한 번만 호출해야 합니다.
+
+    Args:
+        name: 로거 이름 (로그 파일명으로 사용됨)
+        config: ConfigManager 인스턴스
+
+    Returns:
+        설정된 StructuredLogger 인스턴스
+    """
+    global _logger_instance
+    _logger_instance = StructuredLogger(name=name, config=config)
+    return _logger_instance
+
+
+def get_logger(name: str | None = None) -> logging.Logger:
+    """
+    모듈별 로거를 가져옵니다.
+
+    Usage:
+        from src.monitoring.logger import get_logger
+        logger = get_logger(__name__)
+        logger.info("Hello World")
+
+    Args:
+        name: 로거 이름 (일반적으로 __name__ 사용)
+
+    Returns:
+        logging.Logger 인스턴스
+    """
+    if name is None:
+        return logging.getLogger()
+    return logging.getLogger(name)

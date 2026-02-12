@@ -1,7 +1,9 @@
 import importlib
 import logging
+from datetime import datetime, timezone
 
-from ..trading.exchanges.upbit.models import Order
+from ..trading.exchanges.upbit.codes import Timeframe
+from ..trading.exchanges.upbit.models import Candle, Order
 
 try:
     asyncpg = importlib.import_module("asyncpg")
@@ -84,6 +86,138 @@ class DataStorage:
         except Exception as e:
             logger.error(f"Health check failed: {e}")
             return False
+
+    # ========================================================================
+    # CANDLE OPERATIONS
+    # ========================================================================
+
+    async def save_candle(self, candle: Candle, timeframe: Timeframe):
+        if not self.is_connected:
+            return
+
+        sql = """
+
+        INSERT INTO trading.candles (timeframe,
+                                     market,
+                                     candle_date_time_utc,
+                                     candle_date_time_kst,
+                                     opening_price,
+                                     high_price,
+                                     low_price,
+                                     trade_price,
+                                     timestamp,
+                                     candle_acc_trade_price,
+                                     candle_acc_trade_volume,
+                                     unit,
+                                     prev_closing_price,
+                                     change_price,
+                                     change_rate,
+                                     converted_trade_price)
+        VALUES ($1,
+                $2,
+                $3,
+                $4,
+                $5,
+                $6,
+                $7,
+                $8,
+                $9,
+                $10,
+                $11,
+                $12,
+                $13,
+                $14,
+                $15,
+                $16)
+        ON CONFLICT DO NOTHING ;
+        """
+
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                sql,
+                timeframe.value,
+                candle.market,
+                candle.candle_date_time_utc,
+                candle.candle_date_time_kst,
+                candle.opening_price,
+                candle.high_price,
+                candle.low_price,
+                candle.trade_price,
+                candle.timestamp,
+                candle.candle_acc_trade_price,
+                candle.candle_acc_trade_volume,
+                candle.unit,
+                candle.prev_closing_price,
+                candle.change_price,
+                candle.change_rate,
+                candle.converted_trade_price,
+            )
+
+    async def get_candles(
+        self, market: str, timeframe: Timeframe, start: datetime, end: datetime | None = None, limit: int = 1000
+    ) -> list[Candle]:
+        if not self.is_connected:
+            return []
+
+        end = end or datetime.now(tz=timezone.utc)
+
+        sql = """
+        SELECT c.market,
+               c.candle_date_time_utc,
+               c.candle_date_time_kst,
+               c.opening_price,
+               c.high_price,
+               c.low_price,
+               c.trade_price,
+               c.timestamp,
+               c.candle_acc_trade_price,
+               c.candle_acc_trade_volume,
+               c.unit,
+               c.prev_closing_price,
+               c.change_price,
+               c.change_rate,
+               c.converted_trade_price
+        FROM trading.candles AS c
+        WHERE c.market = $1
+        AND c.timeframe = $5
+        AND c.candle_date_time_utc >= $2 AND c.candle_date_time_utc < $3
+        ORDER BY c.time
+        LIMIT $4
+        """
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(sql, market, start, end, limit, timeframe.value)
+
+        return [Candle.from_dict(r) for r in rows]
+
+    async def get_latest_candles(self, market: str, timeframe: Timeframe, count: int = 200):
+        if not self.is_connected:
+            return []
+        sql = """
+        SELECT c.market,
+               c.candle_date_time_utc,
+               c.candle_date_time_kst,
+               c.opening_price,
+               c.high_price,
+               c.low_price,
+               c.trade_price,
+               c.timestamp,
+               c.candle_acc_trade_price,
+               c.candle_acc_trade_volume,
+               c.unit,
+               c.prev_closing_price,
+               c.change_price,
+               c.change_rate,
+               c.converted_trade_price
+        FROM trading.candles AS c
+        WHERE c.market = $1
+        AND c.timeframe = $2
+        ORDER BY time DESC
+        LIMIT $3
+        """
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(sql, market, timeframe.value, count)
+
+        return [Candle.from_dict(r) for r in rows]
 
     # ========================================================================
     # ORDER OPERATIONS

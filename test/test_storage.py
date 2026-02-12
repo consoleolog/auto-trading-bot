@@ -507,3 +507,328 @@ class TestDataStorage:
 
         with pytest.raises(ValueError, match="uuid 또는 identifier 중 하나는 반드시 지정해야 합니다"):
             await storage.get_order()
+
+    # ============= save_candle =============
+
+    @pytest.mark.asyncio
+    async def test_save_candle_inserts_new_candle(self, storage):
+        """새로운 캔들을 DB에 저장한다."""
+        from datetime import datetime, timezone
+        from decimal import Decimal
+
+        from src.trading.exchanges.upbit.codes import Timeframe, Unit
+        from src.trading.exchanges.upbit.models import Candle
+
+        candle = Candle(
+            market="KRW-BTC",
+            candle_date_time_utc=datetime(2026, 2, 12, 10, 0, 0, tzinfo=timezone.utc),
+            candle_date_time_kst=datetime(2026, 2, 12, 19, 0, 0),
+            opening_price=Decimal("50000000"),
+            high_price=Decimal("51000000"),
+            low_price=Decimal("49500000"),
+            trade_price=Decimal("50500000"),
+            timestamp=1707732000000,
+            candle_acc_trade_price=Decimal("5000000000"),
+            candle_acc_trade_volume=Decimal("100"),
+            unit=Unit.MINUTE_1,
+            prev_closing_price=Decimal("50000000"),
+            change_price=Decimal("500000"),
+            change_rate=Decimal("0.01"),
+            converted_trade_price=Decimal("50500000"),
+            first_day_of_period=datetime(2026, 2, 12, 0, 0, 0, tzinfo=timezone.utc),
+        )
+
+        mock_conn = AsyncMock()
+        mock_ctx = AsyncMock()
+        mock_ctx.__aenter__.return_value = mock_conn
+        mock_ctx.__aexit__.return_value = None
+
+        mock_pool = MagicMock()
+        mock_pool.acquire.return_value = mock_ctx
+
+        storage._pool = mock_pool
+        storage._connected = True
+
+        await storage.save_candle(candle, Timeframe.MINUTE_1)
+
+        mock_conn.execute.assert_awaited_once()
+        call_args = mock_conn.execute.await_args
+        sql = call_args[0][0]
+        assert "INSERT INTO trading.candles" in sql
+        assert "ON CONFLICT DO NOTHING" in sql
+
+        # 파라미터 검증
+        params = call_args[0][1:]
+        assert params[0] == Timeframe.MINUTE_1.value  # timeframe
+        assert params[1] == "KRW-BTC"  # market
+        assert params[2] == candle.candle_date_time_utc
+        assert params[3] == candle.candle_date_time_kst
+
+    @pytest.mark.asyncio
+    async def test_save_candle_does_nothing_when_disconnected(self, storage):
+        """연결되지 않은 상태에서는 아무 작업도 하지 않는다."""
+        from datetime import datetime, timezone
+        from decimal import Decimal
+
+        from src.trading.exchanges.upbit.codes import Timeframe, Unit
+        from src.trading.exchanges.upbit.models import Candle
+
+        candle = Candle(
+            market="KRW-BTC",
+            candle_date_time_utc=datetime(2026, 2, 12, 10, 0, 0, tzinfo=timezone.utc),
+            candle_date_time_kst=datetime(2026, 2, 12, 19, 0, 0),
+            opening_price=Decimal("50000000"),
+            high_price=Decimal("51000000"),
+            low_price=Decimal("49500000"),
+            trade_price=Decimal("50500000"),
+            timestamp=1707732000000,
+            candle_acc_trade_price=Decimal("5000000000"),
+            candle_acc_trade_volume=Decimal("100"),
+            unit=Unit.MINUTE_1,
+            prev_closing_price=Decimal("50000000"),
+            change_price=Decimal("500000"),
+            change_rate=Decimal("0.01"),
+            converted_trade_price=Decimal("50500000"),
+            first_day_of_period=datetime(2026, 2, 12, 0, 0, 0, tzinfo=timezone.utc),
+        )
+
+        storage._connected = False
+        storage._pool = None
+
+        await storage.save_candle(candle, Timeframe.MINUTE_1)
+
+    # ============= get_candles =============
+
+    @pytest.mark.asyncio
+    async def test_get_candles_returns_candles_in_range(self, storage):
+        """특정 기간의 캔들을 조회한다."""
+        from datetime import datetime, timezone
+        from decimal import Decimal
+
+        from src.trading.exchanges.upbit.codes import Timeframe
+
+        start = datetime(2026, 2, 12, 10, 0, 0, tzinfo=timezone.utc)
+        end = datetime(2026, 2, 12, 11, 0, 0, tzinfo=timezone.utc)
+
+        mock_rows = [
+            {
+                "market": "KRW-BTC",
+                "candle_date_time_utc": datetime(2026, 2, 12, 10, 0, 0, tzinfo=timezone.utc),
+                "candle_date_time_kst": datetime(2026, 2, 12, 19, 0, 0),
+                "opening_price": Decimal("50000000"),
+                "high_price": Decimal("51000000"),
+                "low_price": Decimal("49500000"),
+                "trade_price": Decimal("50500000"),
+                "timestamp": 1707732000000,
+                "candle_acc_trade_price": Decimal("5000000000"),
+                "candle_acc_trade_volume": Decimal("100"),
+                "unit": 1,
+                "prev_closing_price": Decimal("50000000"),
+                "change_price": Decimal("500000"),
+                "change_rate": Decimal("0.01"),
+                "converted_trade_price": Decimal("50500000"),
+            },
+            {
+                "market": "KRW-BTC",
+                "candle_date_time_utc": datetime(2026, 2, 12, 10, 1, 0, tzinfo=timezone.utc),
+                "candle_date_time_kst": datetime(2026, 2, 12, 19, 1, 0),
+                "opening_price": Decimal("50500000"),
+                "high_price": Decimal("51500000"),
+                "low_price": Decimal("50000000"),
+                "trade_price": Decimal("51000000"),
+                "timestamp": 1707732060000,
+                "candle_acc_trade_price": Decimal("5100000000"),
+                "candle_acc_trade_volume": Decimal("101"),
+                "unit": 1,
+                "prev_closing_price": Decimal("50500000"),
+                "change_price": Decimal("500000"),
+                "change_rate": Decimal("0.01"),
+                "converted_trade_price": Decimal("51000000"),
+            },
+        ]
+
+        mock_conn = AsyncMock()
+        mock_conn.fetch.return_value = mock_rows
+
+        mock_ctx = AsyncMock()
+        mock_ctx.__aenter__.return_value = mock_conn
+        mock_ctx.__aexit__.return_value = None
+
+        mock_pool = MagicMock()
+        mock_pool.acquire.return_value = mock_ctx
+
+        storage._pool = mock_pool
+        storage._connected = True
+
+        candles = await storage.get_candles(
+            market="KRW-BTC", timeframe=Timeframe.MINUTE_1, start=start, end=end, limit=1000
+        )
+
+        assert len(candles) == 2
+        assert candles[0].market == "KRW-BTC"
+        assert candles[0].trade_price == Decimal("50500000")
+        assert candles[1].trade_price == Decimal("51000000")
+
+        mock_conn.fetch.assert_awaited_once()
+        call_args = mock_conn.fetch.await_args
+        sql = call_args[0][0]
+        assert "FROM trading.candles AS c" in sql
+        assert "WHERE c.market = $1" in sql
+        assert "AND c.timeframe = $5" in sql
+
+        # 파라미터 검증
+        params = call_args[0][1:]
+        assert params[0] == "KRW-BTC"
+        assert params[1] == start
+        assert params[2] == end
+        assert params[3] == 1000
+        assert params[4] == Timeframe.MINUTE_1.value
+
+    @pytest.mark.asyncio
+    async def test_get_candles_uses_current_time_when_end_not_provided(self, storage):
+        """end가 제공되지 않으면 현재 시각을 사용한다."""
+        from datetime import datetime, timezone
+
+        from src.trading.exchanges.upbit.codes import Timeframe
+
+        start = datetime(2026, 2, 12, 10, 0, 0, tzinfo=timezone.utc)
+
+        mock_conn = AsyncMock()
+        mock_conn.fetch.return_value = []
+
+        mock_ctx = AsyncMock()
+        mock_ctx.__aenter__.return_value = mock_conn
+        mock_ctx.__aexit__.return_value = None
+
+        mock_pool = MagicMock()
+        mock_pool.acquire.return_value = mock_ctx
+
+        storage._pool = mock_pool
+        storage._connected = True
+
+        await storage.get_candles(
+            market="KRW-BTC",
+            timeframe=Timeframe.MINUTE_1,
+            start=start,
+        )
+
+        mock_conn.fetch.assert_awaited_once()
+        call_args = mock_conn.fetch.await_args
+        params = call_args[0][1:]
+        # end 파라미터 (params[2])가 datetime 객체인지 확인
+        assert isinstance(params[2], datetime)
+
+    @pytest.mark.asyncio
+    async def test_get_candles_returns_empty_when_disconnected(self, storage):
+        """연결되지 않은 상태에서는 빈 리스트를 반환한다."""
+        from datetime import datetime, timezone
+
+        from src.trading.exchanges.upbit.codes import Timeframe
+
+        storage._connected = False
+        storage._pool = None
+
+        start = datetime(2026, 2, 12, 10, 0, 0, tzinfo=timezone.utc)
+
+        candles = await storage.get_candles(
+            market="KRW-BTC",
+            timeframe=Timeframe.MINUTE_1,
+            start=start,
+        )
+
+        assert candles == []
+
+    # ============= get_latest_candles =============
+
+    @pytest.mark.asyncio
+    async def test_get_latest_candles_returns_recent_candles(self, storage):
+        """최근 캔들을 조회한다."""
+        from datetime import datetime, timezone
+        from decimal import Decimal
+
+        from src.trading.exchanges.upbit.codes import Timeframe
+
+        mock_rows = [
+            {
+                "market": "KRW-BTC",
+                "candle_date_time_utc": datetime(2026, 2, 12, 10, 2, 0, tzinfo=timezone.utc),
+                "candle_date_time_kst": datetime(2026, 2, 12, 19, 2, 0),
+                "opening_price": Decimal("51000000"),
+                "high_price": Decimal("52000000"),
+                "low_price": Decimal("50500000"),
+                "trade_price": Decimal("51500000"),
+                "timestamp": 1707732120000,
+                "candle_acc_trade_price": Decimal("5200000000"),
+                "candle_acc_trade_volume": Decimal("102"),
+                "unit": 1,
+                "prev_closing_price": Decimal("51000000"),
+                "change_price": Decimal("500000"),
+                "change_rate": Decimal("0.01"),
+                "converted_trade_price": Decimal("51500000"),
+            },
+            {
+                "market": "KRW-BTC",
+                "candle_date_time_utc": datetime(2026, 2, 12, 10, 1, 0, tzinfo=timezone.utc),
+                "candle_date_time_kst": datetime(2026, 2, 12, 19, 1, 0),
+                "opening_price": Decimal("50500000"),
+                "high_price": Decimal("51500000"),
+                "low_price": Decimal("50000000"),
+                "trade_price": Decimal("51000000"),
+                "timestamp": 1707732060000,
+                "candle_acc_trade_price": Decimal("5100000000"),
+                "candle_acc_trade_volume": Decimal("101"),
+                "unit": 1,
+                "prev_closing_price": Decimal("50500000"),
+                "change_price": Decimal("500000"),
+                "change_rate": Decimal("0.01"),
+                "converted_trade_price": Decimal("51000000"),
+            },
+        ]
+
+        mock_conn = AsyncMock()
+        mock_conn.fetch.return_value = mock_rows
+
+        mock_ctx = AsyncMock()
+        mock_ctx.__aenter__.return_value = mock_conn
+        mock_ctx.__aexit__.return_value = None
+
+        mock_pool = MagicMock()
+        mock_pool.acquire.return_value = mock_ctx
+
+        storage._pool = mock_pool
+        storage._connected = True
+
+        candles = await storage.get_latest_candles(market="KRW-BTC", timeframe=Timeframe.MINUTE_1, count=200)
+
+        assert len(candles) == 2
+        assert candles[0].market == "KRW-BTC"
+        # DESC 정렬이므로 최신 캔들이 먼저 온다
+        assert candles[0].trade_price == Decimal("51500000")
+        assert candles[1].trade_price == Decimal("51000000")
+
+        mock_conn.fetch.assert_awaited_once()
+        call_args = mock_conn.fetch.await_args
+        sql = call_args[0][0]
+        assert "FROM trading.candles AS c" in sql
+        assert "WHERE c.market = $1" in sql
+        assert "AND c.timeframe = $2" in sql
+        assert "ORDER BY time DESC" in sql
+        assert "LIMIT $3" in sql
+
+        # 파라미터 검증
+        params = call_args[0][1:]
+        assert params[0] == "KRW-BTC"
+        assert params[1] == Timeframe.MINUTE_1.value
+        assert params[2] == 200
+
+    @pytest.mark.asyncio
+    async def test_get_latest_candles_returns_empty_when_disconnected(self, storage):
+        """연결되지 않은 상태에서는 빈 리스트를 반환한다."""
+        from src.trading.exchanges.upbit.codes import Timeframe
+
+        storage._connected = False
+        storage._pool = None
+
+        candles = await storage.get_latest_candles(market="KRW-BTC", timeframe=Timeframe.MINUTE_1, count=200)
+
+        assert candles == []

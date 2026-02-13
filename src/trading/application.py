@@ -5,8 +5,8 @@ from signal import SIGINT, SIGTERM, Signals, signal
 from types import FrameType
 
 from src.config import ConfigManager
-from src.database import DataStorage
 from src.database.cache import RedisCache
+from src.database.storage import DataStorage
 from src.trading.exchanges.upbit import UpbitExecutor
 from src.trading.exchanges.upbit.codes import Timeframe
 
@@ -125,14 +125,17 @@ class TradingApplication:
                     tasks.append(task)
                     self.logger.info(f"✅ Started trading task: {market}:{timeframe.value}")
 
-            done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_EXCEPTION)
+            done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
 
             for task in done:
-                if task.exception():
+                if not task.cancelled() and task.exception():
                     self.logger.error(f"Task failed: {task.exception()}")
 
+            self._running = False
             for task in pending:
                 task.cancel()
+            if pending:
+                await asyncio.gather(*pending, return_exceptions=True)
         except Exception as e:
             self.logger.error(f"Critical error in main loop: {e}", exc_info=True)
         finally:

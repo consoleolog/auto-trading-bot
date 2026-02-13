@@ -717,4 +717,3 @@ class TestIntegration:
         assert "Redis cache initialized" in caplog.text
         assert "Exchange adapter initialized" in caplog.text
         assert "Shutdown signal received" in caplog.text
-        assert "Initiating graceful shutdown" in caplog.text

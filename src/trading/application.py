@@ -7,6 +7,8 @@ from types import FrameType
 from src.config import ConfigManager
 from src.database.cache import RedisCache
 from src.database.storage import DataStorage
+from src.strategies import RegimeDetector
+from src.strategies.codes import MarketRegime
 from src.trading.exchanges.upbit import UpbitExecutor
 from src.trading.exchanges.upbit.codes import Timeframe
 
@@ -23,6 +25,7 @@ class TradingApplication:
         self._storage: DataStorage | None = None
         self._cache: RedisCache | None = None
         self._exchange: UpbitExecutor | None = None
+        self._regime_detector: RegimeDetector | None = None
 
         # Runtime state
         self._running = False
@@ -97,6 +100,12 @@ class TradingApplication:
             await self._exchange.connect()
             self.logger.info(f"✅ Exchange adapter initialized (mode={self.mode})")
 
+            # 4. Initialize Regime Detector
+            self._regime_detector = RegimeDetector(
+                config=self.config.get("strategies.regime_detector"), default_regime=MarketRegime.UNKNOWN
+            )
+            logger.info("✅ Regime detector initialized")
+
             self.logger.info("🚀 TradingApplication setup complete!")
             return True
         except Exception as e:
@@ -149,7 +158,13 @@ class TradingApplication:
             try:
                 # Execute trading logic
                 self.logger.info(f"⚡ Executing: {key}")
-                # TODO: add main logic
+
+                # 1. Loading Candles
+                candles = await self._exchange.get_candles(market, timeframe)
+
+                # 2. Get Market Regime
+                regime = self._regime_detector.detect(candles)
+                self.logger.info(f"Current regime: {regime.value}")
 
                 # Sleep until next execution
                 self.logger.debug(f"💤 {key}: Sleeping for {cooldown_seconds}s")

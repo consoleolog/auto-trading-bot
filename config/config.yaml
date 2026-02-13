@@ -13,6 +13,12 @@ exchange:
     api_key: ${UPBIT_API_KEY}
     api_secret: ${UPBIT_API_SECRET}
 
+strategies:
+  regime_detector:
+    ema_short_period: 5
+    ema_mid_period: 20
+    ema_long_period: 40
+
 logging:
   log_level: INFO
   log_dir: logs

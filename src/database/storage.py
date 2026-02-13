@@ -2,6 +2,7 @@ import importlib
 import logging
 from datetime import datetime, timezone
 
+from ..strategies.models import Signal
 from ..trading.exchanges.upbit.codes import Timeframe
 from ..trading.exchanges.upbit.models import Candle, Order
 
@@ -86,6 +87,55 @@ class DataStorage:
         except Exception as e:
             logger.error(f"Health check failed: {e}")
             return False
+
+    # ========================================================================
+    # SIGNAL OPERATIONS
+    # ========================================================================
+
+    async def save_signal(self, signal: Signal):
+        if not self.is_connected:
+            return
+
+        sql = """
+        INSERT INTO trading.signals (strategy_name, market, timeframe, market_regime, metadata)
+        VALUES ($1, $2, $3, $4, $5)
+        ON CONFLICT (strategy_name, market, timeframe)
+            DO UPDATE SET market_regime = $4,
+                          metadata      = $5,
+                          updated_at    = NOW();
+        """
+
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                sql,
+                signal.strategy_name,
+                signal.market,
+                signal.timeframe.value if signal.timeframe else None,
+                signal.market_regime.value if signal.market_regime else None,
+                signal.metadata,
+            )
+
+    async def get_signal(self, market: str, timeframe: Timeframe, strategy_name: str) -> Signal | None:
+        if not self.is_connected:
+            return None
+
+        sql = """
+        SELECT s.strategy_name,
+               s.market,
+               s.timeframe,
+               s.market_regime,
+               s.metadata,
+               s.created_at,
+               s.updated_at
+        FROM trading.signals AS s
+        WHERE s.market = $1
+        AND s.timeframe = $2
+        AND s.strategy_name = $3;
+        """
+
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(sql, market, timeframe.value, strategy_name)
+        return Signal.from_dict(row) if row is not None else None
 
     # ========================================================================
     # CANDLE OPERATIONS

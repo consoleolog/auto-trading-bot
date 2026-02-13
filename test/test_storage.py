@@ -832,3 +832,245 @@ class TestDataStorage:
         candles = await storage.get_latest_candles(market="KRW-BTC", timeframe=Timeframe.MINUTE_1, count=200)
 
         assert candles == []
+
+    # ============= save_signal =============
+
+    @pytest.mark.asyncio
+    async def test_save_signal_inserts_new_signal(self, storage):
+        """새로운 신호를 DB에 저장한다."""
+        from datetime import datetime, timezone
+
+        from src.strategies.codes import MarketRegime
+        from src.strategies.models import Signal
+        from src.trading.exchanges.upbit.codes import Timeframe
+
+        signal = Signal(
+            strategy_name="rsi_strategy",
+            market="KRW-BTC",
+            timeframe=Timeframe.HOUR,
+            market_regime=MarketRegime.STABLE_BULL,
+            metadata={"rsi": 70.5},
+            created_at=datetime(2026, 2, 13, 9, 0, 0, tzinfo=timezone.utc),
+            updated_at=datetime(2026, 2, 13, 9, 0, 0, tzinfo=timezone.utc),
+        )
+
+        mock_conn = AsyncMock()
+        mock_ctx = AsyncMock()
+        mock_ctx.__aenter__.return_value = mock_conn
+        mock_ctx.__aexit__.return_value = None
+
+        mock_pool = MagicMock()
+        mock_pool.acquire.return_value = mock_ctx
+
+        storage._pool = mock_pool
+        storage._connected = True
+
+        await storage.save_signal(signal)
+
+        mock_conn.execute.assert_awaited_once()
+        call_args = mock_conn.execute.await_args
+        sql = call_args[0][0]
+        assert "INSERT INTO trading.signals" in sql
+        assert "ON CONFLICT" in sql
+
+        params = call_args[0][1:]
+        assert params[0] == "rsi_strategy"
+        assert params[1] == "KRW-BTC"
+        assert params[2] == Timeframe.HOUR.value
+        assert params[3] == MarketRegime.STABLE_BULL.value
+        assert params[4] == {"rsi": 70.5}
+
+    @pytest.mark.asyncio
+    async def test_save_signal_updates_on_conflict(self, storage):
+        """동일 (strategy_name, market, timeframe) 조합이 존재하면 업데이트한다."""
+        from datetime import datetime, timezone
+
+        from src.strategies.codes import MarketRegime
+        from src.strategies.models import Signal
+        from src.trading.exchanges.upbit.codes import Timeframe
+
+        signal = Signal(
+            strategy_name="rsi_strategy",
+            market="KRW-BTC",
+            timeframe=Timeframe.HOUR,
+            market_regime=MarketRegime.STABLE_BULL,
+            metadata={"rsi": 25.0},
+            created_at=datetime(2026, 2, 13, 9, 0, 0, tzinfo=timezone.utc),
+            updated_at=datetime(2026, 2, 13, 9, 0, 0, tzinfo=timezone.utc),
+        )
+
+        mock_conn = AsyncMock()
+        mock_ctx = AsyncMock()
+        mock_ctx.__aenter__.return_value = mock_conn
+        mock_ctx.__aexit__.return_value = None
+
+        mock_pool = MagicMock()
+        mock_pool.acquire.return_value = mock_ctx
+
+        storage._pool = mock_pool
+        storage._connected = True
+
+        await storage.save_signal(signal)
+
+        mock_conn.execute.assert_awaited_once()
+        call_args = mock_conn.execute.await_args
+        sql = call_args[0][0]
+        assert "DO UPDATE SET" in sql
+
+    @pytest.mark.asyncio
+    async def test_save_signal_does_nothing_when_disconnected(self, storage):
+        """연결되지 않은 상태에서는 아무 작업도 하지 않는다."""
+        from datetime import datetime, timezone
+
+        from src.strategies.codes import MarketRegime
+        from src.strategies.models import Signal
+        from src.trading.exchanges.upbit.codes import Timeframe
+
+        signal = Signal(
+            strategy_name="rsi_strategy",
+            market="KRW-BTC",
+            timeframe=Timeframe.HOUR,
+            market_regime=MarketRegime.STABLE_BULL,
+            metadata={},
+            created_at=datetime(2026, 2, 13, 9, 0, 0, tzinfo=timezone.utc),
+            updated_at=datetime(2026, 2, 13, 9, 0, 0, tzinfo=timezone.utc),
+        )
+
+        storage._connected = False
+        storage._pool = None
+
+        await storage.save_signal(signal)
+
+    @pytest.mark.asyncio
+    async def test_save_signal_handles_none_timeframe_and_regime(self, storage):
+        """timeframe, market_regime 이 None 이어도 저장할 수 있다."""
+        from datetime import datetime, timezone
+
+        from src.strategies.models import Signal
+
+        signal = Signal(
+            strategy_name="rsi_strategy",
+            market="KRW-BTC",
+            timeframe=None,
+            market_regime=None,
+            metadata=None,
+            created_at=datetime(2026, 2, 13, 9, 0, 0, tzinfo=timezone.utc),
+            updated_at=datetime(2026, 2, 13, 9, 0, 0, tzinfo=timezone.utc),
+        )
+
+        mock_conn = AsyncMock()
+        mock_ctx = AsyncMock()
+        mock_ctx.__aenter__.return_value = mock_conn
+        mock_ctx.__aexit__.return_value = None
+
+        mock_pool = MagicMock()
+        mock_pool.acquire.return_value = mock_ctx
+
+        storage._pool = mock_pool
+        storage._connected = True
+
+        await storage.save_signal(signal)
+
+        mock_conn.execute.assert_awaited_once()
+        call_args = mock_conn.execute.await_args
+        params = call_args[0][1:]
+        assert params[2] is None  # timeframe
+        assert params[3] is None  # market_regime
+
+    # ============= get_signal =============
+
+    @pytest.mark.asyncio
+    async def test_get_signal_returns_signal_when_found(self, storage):
+        """저장된 신호를 market, timeframe, strategy_name 으로 조회한다."""
+        from datetime import datetime, timezone
+
+        from src.trading.exchanges.upbit.codes import Timeframe
+
+        mock_row = {
+            "strategy_name": "rsi_strategy",
+            "market": "KRW-BTC",
+            "timeframe": Timeframe.HOUR.value,
+            "market_regime": "BULL",
+            "metadata": {"rsi": 70.5},
+            "created_at": datetime(2026, 2, 13, 9, 0, 0, tzinfo=timezone.utc),
+            "updated_at": datetime(2026, 2, 13, 9, 0, 0, tzinfo=timezone.utc),
+        }
+
+        mock_conn = AsyncMock()
+        mock_conn.fetchrow.return_value = mock_row
+
+        mock_ctx = AsyncMock()
+        mock_ctx.__aenter__.return_value = mock_conn
+        mock_ctx.__aexit__.return_value = None
+
+        mock_pool = MagicMock()
+        mock_pool.acquire.return_value = mock_ctx
+
+        storage._pool = mock_pool
+        storage._connected = True
+
+        signal = await storage.get_signal(
+            market="KRW-BTC",
+            timeframe=Timeframe.HOUR,
+            strategy_name="rsi_strategy",
+        )
+
+        assert signal is not None
+        assert signal.strategy_name == "rsi_strategy"
+        assert signal.market == "KRW-BTC"
+        assert signal.metadata == {"rsi": 70.5}
+
+        mock_conn.fetchrow.assert_awaited_once()
+        call_args = mock_conn.fetchrow.await_args
+        sql = call_args[0][0]
+        assert "FROM trading.signals AS s" in sql
+        assert "WHERE s.market = $1" in sql
+        assert "AND s.timeframe = $2" in sql
+        assert "AND s.strategy_name = $3" in sql
+
+        params = call_args[0][1:]
+        assert params[0] == "KRW-BTC"
+        assert params[1] == Timeframe.HOUR.value
+        assert params[2] == "rsi_strategy"
+
+    @pytest.mark.asyncio
+    async def test_get_signal_returns_none_when_not_found(self, storage):
+        """신호가 없으면 None을 반환한다."""
+        from src.trading.exchanges.upbit.codes import Timeframe
+
+        mock_conn = AsyncMock()
+        mock_conn.fetchrow.return_value = None
+
+        mock_ctx = AsyncMock()
+        mock_ctx.__aenter__.return_value = mock_conn
+        mock_ctx.__aexit__.return_value = None
+
+        mock_pool = MagicMock()
+        mock_pool.acquire.return_value = mock_ctx
+
+        storage._pool = mock_pool
+        storage._connected = True
+
+        signal = await storage.get_signal(
+            market="KRW-BTC",
+            timeframe=Timeframe.HOUR,
+            strategy_name="nonexistent_strategy",
+        )
+
+        assert signal is None
+
+    @pytest.mark.asyncio
+    async def test_get_signal_returns_none_when_disconnected(self, storage):
+        """연결되지 않은 상태에서는 None을 반환한다."""
+        from src.trading.exchanges.upbit.codes import Timeframe
+
+        storage._connected = False
+        storage._pool = None
+
+        signal = await storage.get_signal(
+            market="KRW-BTC",
+            timeframe=Timeframe.HOUR,
+            strategy_name="rsi_strategy",
+        )
+
+        assert signal is None

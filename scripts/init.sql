@@ -32,13 +32,13 @@ CREATE TABLE IF NOT EXISTS trading.trades
     updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()                            -- 업데이트 시간
 );
 
--- Strategies
-CREATE TABLE IF NOT EXISTS trading.strategy_signals
+-- Signals
+CREATE TABLE IF NOT EXISTS trading.signals
 (
+    strategy_name TEXT        NOT NULL,               -- 전략명
     market        TEXT        NOT NULL,               -- 페어의 코드
     timeframe     TEXT        NOT NULL,               -- 거래 중인 페어의 기간
-    strategy_name TEXT        NOT NULL,               -- 전략명
-    status        TEXT        NOT NULL,               -- 전략 상태
+    market_regime INTEGER     NOT NULL,               -- 시장 국면
     metadata      JSONB       NOT NULL,               -- 세부 시그널 데이터
     created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(), -- 생성 시간
     updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(), -- 업데이트 시간

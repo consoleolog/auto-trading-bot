@@ -23,8 +23,8 @@ class Signal:
     timeframe: Timeframe | None
     market_regime: MarketRegime | None
     metadata: dict | None
-    created_at: datetime | None
-    updated_at: datetime | None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
     def __post_init__(self):
         if isinstance(self.market_regime, MarketRegime):
